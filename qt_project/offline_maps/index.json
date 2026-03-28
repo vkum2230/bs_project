@@ -1,0 +1,8 @@
+{
+  "provinces": {},
+  "stats": {
+    "total_tiles": 0,
+    "total_size_mb": 0.0,
+    "output_dir": "offline_maps"
+  }
+}

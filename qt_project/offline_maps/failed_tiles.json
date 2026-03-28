@@ -1,0 +1,38 @@
+[
+  [
+    13381,
+    7139,
+    14,
+    "HTTPSConnectionPool(host='c.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13381/7139.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88aa4410>, 'Connection to c.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ],
+  [
+    13381,
+    7137,
+    14,
+    "HTTPSConnectionPool(host='a.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13381/7137.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88aa42d0>, 'Connection to a.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ],
+  [
+    13382,
+    7137,
+    14,
+    "HTTPSConnectionPool(host='b.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13382/7137.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88aa4690>, 'Connection to b.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ],
+  [
+    13381,
+    7138,
+    14,
+    "HTTPSConnectionPool(host='b.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13381/7138.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88aa4550>, 'Connection to b.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ],
+  [
+    13382,
+    7138,
+    14,
+    "HTTPSConnectionPool(host='c.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13382/7138.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88a774d0>, 'Connection to c.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ],
+  [
+    13382,
+    7139,
+    14,
+    "HTTPSConnectionPool(host='a.tile.openstreetmap.org', port=443): Max retries exceeded with url: /14/13382/7139.png (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7fff88a76e90>, 'Connection to a.tile.openstreetmap.org timed out. (connect timeout=15)'))"
+  ]
+]

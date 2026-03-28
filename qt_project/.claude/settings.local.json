@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 test_tianditu.py)",
+      "Bash(python3 main.py)",
+      "Bash(pip3 install:*)",
+      "Bash(sudo apt:*)",
+      "Bash(while pgrep:*)",
+      "Bash(do sleep:*)",
+      "Bash(done)",
+      "Bash(dpkg -l)",
+      "Bash(python3 -c \"from PyQt5.QtWebEngineWidgets import QWebEngineView; print\\(''✅ WebEngine已安装''\\)\")",
+      "Bash(python3 -c \"from PyQt5.QtWebEngineWidgets import QWebEngineView; print\\(''✅ WebEngine安装成功''\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(mkdir -p leaflet)",
+      "Bash(wget -q https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.min.css -O leaflet.css)",
+      "Bash(wget -q https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.min.js -O leaflet.js)",
+      "Bash(mv leaflet/leaflet.css leaflet/leaflet.js .)",
+      "Bash(rmdir leaflet/leaflet)",
+      "Bash(mv leaflet.css leaflet.js leaflet/)",
+      "Bash(rm -rf leaflet)",
+      "Bash(mkdir leaflet:*)"
+    ]
+  }
+}
