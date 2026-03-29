@@ -564,13 +564,13 @@ class PinyinHandler(QObject):
         
         result = basic_dict.get(pinyin.lower(), [])
         if result:
-            return result
+            return result[:5]  # 最多返回5个
             
         matches = []
         for key, chars in basic_dict.items():
             if key.startswith(pinyin.lower()) and key != pinyin.lower():
                 matches.extend(chars[:2])
-        return matches[:8]
+        return matches[:5]  # 最多返回5个
 
 
 class MapWidget(QWidget):
@@ -1748,11 +1748,13 @@ class MapWidget(QWidget):
             if (Array.isArray(result)) {{
                 // 兼容旧格式（数组）
                 candidates = result;
+                console.log('[IME] Received array format, length:', candidates.length);
             }} else if (result && result.candidates) {{
                 // 新格式（分页对象）
                 candidates = result.candidates;
                 hasMore = result.has_more;
                 currentPage = result.page || 0;
+                console.log('[IME] Received object format, page:', currentPage, 'candidates:', candidates.length, 'hasMore:', hasMore);
             }}
             
             if (!candidates || candidates.length === 0) return;
@@ -1778,7 +1780,7 @@ class MapWidget(QWidget):
             }}
             
             // 添加候选词按钮（最多5个）
-            candidates.forEach(function(ch) {{
+            candidates.slice(0, 5).forEach(function(ch) {{
                 var btn = document.createElement('button');
                 btn.className = 'candidate-item';
                 btn.textContent = ch;
