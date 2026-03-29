@@ -11,6 +11,14 @@ import urllib.request
 import urllib.parse
 import json
 
+# 导入智能拼音输入法
+try:
+    from smart_pinyin_ime import get_ime
+    _HAS_SMART_IME = True
+except ImportError:
+    _HAS_SMART_IME = False
+    print("[警告] 智能拼音输入法加载失败，使用基础词典")
+
 
 class AMapAPIHandler(QObject):
     """高德地图 WebService API 处理后端"""
@@ -114,20 +122,41 @@ class AMapAPIHandler(QObject):
 
 
 class PinyinHandler(QObject):
-    """拼音处理后端"""
+    """拼音处理后端 - 使用智能拼音输入法"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._ime = None
+        if _HAS_SMART_IME:
+            try:
+                self._ime = get_ime()
+                print("[PinyinHandler] 智能拼音输入法初始化成功")
+            except Exception as e:
+                print(f"[PinyinHandler] 智能输入法初始化失败: {e}")
         
     @pyqtSlot(str, result='QVariantList')
     def get_candidates(self, pinyin):
-        """根据拼音获取候选汉字"""
+        """根据拼音获取候选汉字/词组"""
         if not pinyin:
             return []
         
-        pinyin = pinyin.lower()
+        pinyin = pinyin.lower().strip()
         
-        dict = {
+        # 使用智能输入法（如果可用）
+        if self._ime:
+            try:
+                candidates = self._ime.get_candidates(pinyin)
+                if candidates:
+                    return candidates
+            except Exception as e:
+                print(f"[PinyinHandler] 智能输入法查询失败: {e}")
+        
+        # 回退到基础词典
+        return self._get_basic_candidates(pinyin)
+    
+    def _get_basic_candidates(self, pinyin):
+        """基础词典（作为备用）"""
+        basic_dict = {
             'a': ['阿','啊','安','岸','按','案','暗'],
             'ai': ['哀','埃','挨','爱'],
             'an': ['安','岸','按','案','暗'],
@@ -512,12 +541,12 @@ class PinyinHandler(QObject):
             'zuo': ['作','做','坐','座','左','佐','昨']
         }
         
-        result = dict.get(pinyin.lower(), [])
+        result = basic_dict.get(pinyin.lower(), [])
         if result:
             return result
             
         matches = []
-        for key, chars in dict.items():
+        for key, chars in basic_dict.items():
             if key.startswith(pinyin.lower()) and key != pinyin.lower():
                 matches.extend(chars[:2])
         return matches[:8]
