@@ -63,7 +63,6 @@ class SmartPinyinIME:
     
     def __init__(self):
         self.char_dict = {}
-        self.word_dict = {}
         self._init_complete = False
         self._page_size = 5
         self._full_dict_loaded = False
@@ -71,13 +70,11 @@ class SmartPinyinIME:
     def initialize(self):
         if self._init_complete:
             return
-        print("[SmartPinyinIME] 正在加载智能词库...")
+        print("[SmartPinyinIME] 正在加载字库...")
         self._load_char_dictionary()
-        self._load_word_dictionary()
         self._init_complete = True
         char_count = sum(len(v) for v in self.char_dict.values())
-        word_count = sum(len(v) for v in self.word_dict.values())
-        print(f"[SmartPinyinIME] 加载完成: {char_count}高频字, {word_count}词组")
+        print(f"[SmartPinyinIME] 加载完成: {char_count}汉字")
     
     def _load_char_dictionary(self):
         """加载高频汉字拼音映射"""
@@ -119,44 +116,6 @@ class SmartPinyinIME:
         self._full_dict_loaded = True
         print(f"[SmartPinyinIME] 全库加载完成: 新增{count}字")
     
-    def _load_word_dictionary(self):
-        """加载常用词组"""
-        words = [
-            ("北京", "beijing"), ("背景", "beijing"), ("上海", "shanghai"),
-            ("广州", "guangzhou"), ("深圳", "shenzhen"), ("天津", "tianjin"),
-            ("重庆", "chongqing"), ("南京", "nanjing"), ("杭州", "hangzhou"),
-            ("武汉", "wuhan"), ("西安", "xian"), ("成都", "chengdu"),
-            ("中国", "zhongguo"), ("人民", "renmin"), ("共和国", "gongheguo"),
-            ("中华", "zhonghua"), ("天安门", "tiananmen"), ("故宫", "gugong"),
-            ("长城", "changcheng"), ("公司", "gongsi"), ("大学", "daxue"),
-            ("中学", "zhongxue"), ("小学", "xiaoxue"), ("医院", "yiyuan"),
-            ("银行", "yinhang"), ("超市", "chaoshi"), ("商店", "shangdian"),
-            ("饭店", "fandian"), ("机场", "jichang"), ("火车站", "huochezhan"),
-            ("汽车站", "qichezhan"), ("地铁", "ditie"), ("公交", "gongjiao"),
-            ("地图", "ditu"), ("导航", "daohang"), ("位置", "weizhi"),
-            ("路线", "luxian"), ("目的地", "mudedi"), ("今天", "jintian"),
-            ("明天", "mingtian"), ("昨天", "zuotian"), ("上午", "shangwu"),
-            ("下午", "xiawu"), ("晚上", "wanshang"), ("早上", "zaoshang"),
-            ("中午", "zhongwu"), ("现在", "xianzai"), ("时间", "shijian"),
-            ("天气", "tianqi"), ("温度", "wendu"),
-            # 添加更多词组
-            ("多少", "duoshao"), ("怎么", "zenme"), ("什么", "shenme"),
-            ("哪里", "nali"), ("那里", "nali"), ("这里", "zheli"),
-            ("谢谢", "xiexie"), ("不客气", "bukeqi"), ("对不起", "duibuqi"),
-            ("没关系", "meiguanxi"), ("你好", "nihao"), ("再见", "zaijian"),
-            ("请问", "qingwen"), ("好的", "haode"), ("可以", "keyi"),
-            ("不行", "buxing"), ("确定", "queding"), ("取消", "quxiao"),
-            ("返回", "fanhui"), ("前进", "qianjin"), ("左转", "zuozhuan"),
-            ("右转", "youzhuan"), ("直行", "zhixing"), ("掉头", "diaotou"),
-            ("高速", "gaosu"), ("收费站", "shoufeizhan"), ("服务区", "fuwuqu"),
-            ("出口", "chukou"), ("入口", "rukou"), ("红绿灯", "honglvdeng"),
-            ("路口", "lukou"), ("环岛", "huandao"), ("匝道", "zhadao"),
-        ]
-        for word, py in words:
-            if py not in self.word_dict:
-                self.word_dict[py] = []
-            self.word_dict[py].append(word)
-    
     def get_candidates(self, pinyin_str, page=0, load_full=False):
         """
         根据拼音获取候选词（支持分页）
@@ -190,31 +149,19 @@ class SmartPinyinIME:
         high_freq_set = set(self.HIGH_FREQ_CHARS)
         
         # 分类收集结果（保持优先级）
-        exact_words = []      # 完全匹配的词组
         exact_chars = []      # 完全匹配的单字
-        prefix_words = []     # 前缀匹配的词组
         prefix_chars = []     # 前缀匹配的单字
         
-        # 1. 完全匹配的词组
-        if pinyin_str in self.word_dict:
-            exact_words.extend(self.word_dict[pinyin_str])
-        
-        # 2. 完全匹配的单字
+        # 1. 完全匹配的单字
         if pinyin_str in self.char_dict:
             exact_chars.extend(self.char_dict[pinyin_str])
         
-        # 3. 前缀匹配词组
-        for py, words in self.word_dict.items():
-            if py.startswith(pinyin_str) and py != pinyin_str:
-                prefix_words.extend(words)
-        
-        # 4. 前缀匹配单字
+        # 2. 前缀匹配单字
         for py, chars in self.char_dict.items():
             if py.startswith(pinyin_str) and py != pinyin_str:
                 prefix_chars.extend(chars)
         
         # 合并结果：高频字在前，低频字在后
-        # 顺序：完全匹配词组 > 完全匹配高频单字 > 前缀匹配高频单字 > 其他
         def prioritize(items):
             """将列表分为高频和低频两部分，保持原顺序"""
             high = [c for c in items if c in high_freq_set]
@@ -225,25 +172,13 @@ class SmartPinyinIME:
         seen = set()
         all_results = []
         
-        # 1. 完全匹配的词组（全部保留）
-        for item in exact_words:
-            if item not in seen:
-                seen.add(item)
-                all_results.append(item)
-        
-        # 2. 完全匹配的单字（高频优先）
+        # 1. 完全匹配的单字（高频优先）
         for item in prioritize(exact_chars):
             if item not in seen:
                 seen.add(item)
                 all_results.append(item)
         
-        # 3. 前缀匹配的词组
-        for item in prefix_words:
-            if item not in seen:
-                seen.add(item)
-                all_results.append(item)
-        
-        # 4. 前缀匹配的单字（高频优先）
+        # 2. 前缀匹配的单字（高频优先）
         for item in prioritize(prefix_chars):
             if item not in seen:
                 seen.add(item)
