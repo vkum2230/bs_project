@@ -453,17 +453,18 @@ class ButtonVoiceAssistant:
                 
                 print(f"[ButtonVoiceAssistant] 识别结果: {clean_text} (置信度: {result.confidence:.2f})")
                 
-                # 3. 调用 Ollama 大模型处理（异步，不阻塞）
+                # 3. 调用 Ollama 大模型处理（异步，不阻塞，限制长度）
                 if hasattr(self, 'ollama_client') and self.ollama_client and result.confidence > 0.3:
                     # 显示"思考中"提示
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
                     
-                    # 异步调用大模型
+                    # 异步调用大模型（限制最多80个token，约40个汉字，更快）
                     self.ollama_client.chat_async(
                         prompt=clean_text,
                         callback=lambda response: self._handle_ollama_response(response),
-                        system_prompt="你是骑行助手小智，回答简洁，适合骑行时听取。"
+                        system_prompt="你是骑行助手小智，回答简洁，适合骑行时听取。",
+                        max_tokens=80  # 限制生成长度，提高速度
                     )
                 else:
                     # 没有 Ollama 时，直接显示识别结果

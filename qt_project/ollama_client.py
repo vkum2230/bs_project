@@ -26,35 +26,44 @@ class OllamaClient:
         self.host = host
         self.api_url = f"{host}/api/generate"
         
-    def chat(self, prompt: str, system_prompt: str = None, stream: bool = False) -> str:
+    def chat(self, prompt: str, system_prompt: str = None, 
+             max_tokens: int = 100, temperature: float = 0.7) -> str:
         """
-        发送对话请求
+        发送对话请求（快速模式）
         
         Args:
             prompt: 用户输入
             system_prompt: 系统提示词
-            stream: 是否流式输出
+            max_tokens: 最大生成token数（默认100，约50个汉字）
+            temperature: 创造性程度（越低越快，默认0.7）
             
         Returns:
             模型回复文本
         """
         try:
-            # 构建请求数据
+            # 构建请求数据（优化参数）
             data = {
                 "model": self.model_name,
                 "prompt": prompt,
-                "stream": stream
+                "stream": False,
+                "options": {
+                    "num_predict": max_tokens,  # 限制生成长度
+                    "temperature": temperature,  # 降低创造性，提高速度
+                    "top_k": 40,  # 降低采样范围
+                    "top_p": 0.9,
+                    "repeat_penalty": 1.1
+                }
             }
             
             # 添加系统提示词（如果提供）
             if system_prompt:
                 data["system"] = system_prompt
             
-            # 发送请求
+            # 发送请求（缩短超时）
             response = requests.post(
                 self.api_url,
                 json=data,
-                timeout=60  # 60秒超时
+                timeout=15  # 15秒超时，避免等待太久
             )
             
             if response.status_code == 200:
@@ -75,7 +84,7 @@ class OllamaClient:
             return "抱歉，出错了。"
     
     def chat_async(self, prompt: str, callback: Callable[[str], None], 
-                   system_prompt: str = None):
+                   system_prompt: str = None, max_tokens: int = 100):
         """
         异步发送对话请求（不阻塞）
         
@@ -83,12 +92,78 @@ class OllamaClient:
             prompt: 用户输入
             callback: 回调函数，接收回复文本
             system_prompt: 系统提示词
+            max_tokens: 最大生成长度
         """
         def _do_chat():
-            response = self.chat(prompt, system_prompt)
+            response = self.chat(prompt, system_prompt, max_tokens=max_tokens)
             callback(response)
         
         thread = threading.Thread(target=_do_chat)
+        thread.daemon = True
+        thread.start()
+    
+    def chat_stream(self, prompt: str, 
+                    on_token: Callable[[str], None],
+                    on_complete: Callable[[str], None],
+                    system_prompt: str = None,
+                    max_tokens: int = 100):
+        """
+        流式对话（边生成边返回，体验更好）
+        
+        Args:
+            prompt: 用户输入
+            on_token: 收到每个token时的回调
+            on_complete: 完成时的回调（接收完整文本）
+            system_prompt: 系统提示词
+            max_tokens: 最大生成长度
+        """
+        def _do_stream():
+            try:
+                data = {
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": True,  # 流式输出
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": 0.7,
+                        "top_k": 40,
+                        "top_p": 0.9
+                    }
+                }
+                
+                if system_prompt:
+                    data["system"] = system_prompt
+                
+                full_response = ""
+                response = requests.post(
+                    self.api_url,
+                    json=data,
+                    stream=True,  # 流式接收
+                    timeout=15
+                )
+                
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            json_line = json.loads(line)
+                            token = json_line.get("response", "")
+                            if token:
+                                full_response += token
+                                on_token(token)  # 实时回调
+                            
+                            # 检查是否完成
+                            if json_line.get("done", False):
+                                break
+                        except:
+                            pass
+                
+                on_complete(full_response.strip())
+                
+            except Exception as e:
+                print(f"[OllamaClient] 流式请求错误: {e}")
+                on_complete("抱歉，出错了。")
+        
+        thread = threading.Thread(target=_do_stream)
         thread.daemon = True
         thread.start()
     
