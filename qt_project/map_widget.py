@@ -13,11 +13,17 @@ import json
 
 # 导入智能拼音输入法
 try:
+    # 尝试相对导入（作为包的一部分）
     from .smart_pinyin_ime import get_ime
     _HAS_SMART_IME = True
 except ImportError:
-    _HAS_SMART_IME = False
-    print("[警告] 智能拼音输入法加载失败，使用基础词典")
+    try:
+        # 尝试绝对导入（直接运行）
+        from smart_pinyin_ime import get_ime
+        _HAS_SMART_IME = True
+    except ImportError:
+        _HAS_SMART_IME = False
+        print("[警告] 智能拼音输入法加载失败，使用基础词典")
 
 
 class AMapAPIHandler(QObject):
