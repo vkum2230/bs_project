@@ -393,6 +393,10 @@ class ButtonVoiceAssistant:
     
     def _on_button_press(self):
         """按钮按下 - 开始录音"""
+        # 防止重复触发（如果已经在录音中则忽略）
+        if self._recording_indicator:
+            return
+        
         print("[ButtonVoiceAssistant] 按钮按下 - 开始录音")
         
         # 显示录音提示
