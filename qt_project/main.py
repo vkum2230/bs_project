@@ -508,7 +508,8 @@ class BikeComputerPro(QWidget):
 
         # --- 消息框 ---
         self.dialog_container = QWidget()
-        self.dialog_container.setFixedHeight(110)
+        self.dialog_container.setMinimumHeight(110)
+        self.dialog_container.setMaximumHeight(180)  # 允许更高
         self.dialog_container.setStyleSheet("background: transparent;")
         
         dialog_layout = QVBoxLayout(self.dialog_container)
@@ -516,7 +517,8 @@ class BikeComputerPro(QWidget):
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
-        self.dialog_box.setFixedHeight(95)
+        self.dialog_box.setMinimumHeight(95)
+        self.dialog_box.setMaximumHeight(150)  # 允许更高以显示多行
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -524,13 +526,16 @@ class BikeComputerPro(QWidget):
                 border: 1px solid #4A4A4A;
             }
         """)
-        box_layout = QHBoxLayout(self.dialog_box)
-        box_layout.setContentsMargins(15, 0, 15, 0)
+        box_layout = QVBoxLayout(self.dialog_box)  # 改为垂直布局
+        box_layout.setContentsMargins(15, 10, 15, 10)
+        box_layout.setSpacing(5)
         
         self.dialog_msg = QLabel("🤖 欢迎使用 SMART RIDE 智能助理...")
         self.dialog_msg.setFont(QFont("Helvetica", 13))
         self.dialog_msg.setStyleSheet("color: #CCCCCC; background: transparent;")
         self.dialog_msg.setWordWrap(True)  # 启用自动换行
+        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # 左对齐
+        self.dialog_msg.setTextFormat(Qt.PlainText)  # 纯文本模式，保留换行符
         box_layout.addWidget(self.dialog_msg)
         
         # 语音消息历史（最多显示最近3条，避免超出界面）
@@ -746,8 +751,11 @@ class BikeComputerPro(QWidget):
             text: 消息内容
             icon: 消息图标
         """
+        # 清理文本：将多行合并为一行，避免格式混乱
+        cleaned_text = text.replace('\n', ' ').replace('\r', ' ').strip()
+        
         # 使用 > 符号作为前缀，不显示时间戳
-        message = f"> {text}"
+        message = f"> {cleaned_text}"
         
         # 添加到历史
         self.voice_messages.append(message)
