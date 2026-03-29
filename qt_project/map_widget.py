@@ -1812,27 +1812,33 @@ class MapWidget(QWidget):
             buttonsDiv.style.alignItems = 'center';
             buttonsDiv.style.marginLeft = '8px';
             
-            // 如果不是第一页，显示 << 按钮
+            // 始终显示 << 按钮，第一页时禁用
+            var prevBtn = document.createElement('button');
+            prevBtn.className = 'candidate-item more-btn';
+            prevBtn.textContent = '<<';
             if (currentPage > 0) {{
-                var prevBtn = document.createElement('button');
-                prevBtn.className = 'candidate-item more-btn';
-                prevBtn.textContent = '<<';
                 prevBtn.onclick = function() {{ 
                     fetchCandidates(currentCandidatePage - 1);
                 }};
-                buttonsDiv.appendChild(prevBtn);
+            }} else {{
+                prevBtn.style.opacity = '0.3';
+                prevBtn.style.cursor = 'not-allowed';
             }}
+            buttonsDiv.appendChild(prevBtn);
             
-            // 如果有更多候选词，显示 >> 按钮
+            // 始终显示 >> 按钮，没有更多时禁用
+            var moreBtn = document.createElement('button');
+            moreBtn.className = 'candidate-item more-btn';
+            moreBtn.textContent = '>>';
             if (hasMore) {{
-                var moreBtn = document.createElement('button');
-                moreBtn.className = 'candidate-item more-btn';
-                moreBtn.textContent = '>>';
                 moreBtn.onclick = function() {{ 
                     fetchCandidates(currentCandidatePage + 1);
                 }};
-                buttonsDiv.appendChild(moreBtn);
+            }} else {{
+                moreBtn.style.opacity = '0.3';
+                moreBtn.style.cursor = 'not-allowed';
             }}
+            buttonsDiv.appendChild(moreBtn);
             
             wrapperDiv.appendChild(candidatesDiv);
             wrapperDiv.appendChild(buttonsDiv);
