@@ -454,10 +454,11 @@ class ButtonVoiceAssistant:
                 
                 print(f"[ButtonVoiceAssistant] 识别结果: {clean_text} (置信度: {result.confidence:.2f})")
                 
-                # 3. 语音播报识别结果（使用去掉空格的文本）
+                # 3. 语音播报识别结果（使用去掉空格的文本，不重复显示UI）
                 if self.voice_player and result.confidence > 0.3:
                     speak_text = clean_text[:50]  # 限制长度
-                    self.voice_player.speak(speak_text, block=False)
+                    # 设置 show_in_ui=False，避免重复显示（已经在上面显示过了）
+                    self.voice_player.speak(speak_text, block=False, show_in_ui=False)
             else:
                 if self.message_callback:
                     self.message_callback("❌ 未能识别语音", icon="⚠️")
