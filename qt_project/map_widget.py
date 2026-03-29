@@ -1714,18 +1714,19 @@ class MapWidget(QWidget):
                 'zui': ['最','罪','嘴','醉'],
                 'zun': ['尊','遵'],
                 'zuo': ['作','做','坐','座','左','佐','昨']
-            }};
-            
-            var result = dict[py.toLowerCase()];
-            if (result) return result;
-            
-            var matches = [];
-            for (var key in dict) {{
-                if (key.startsWith(py.toLowerCase()) && key !== py.toLowerCase()) {{
-                    matches = matches.concat(dict[key].slice(0, 2));
+                }};
+                
+                var result = dict[py.toLowerCase()];
+                if (result) return result;
+                
+                var matches = [];
+                for (var key in dict) {{
+                    if (key.startsWith(py.toLowerCase()) && key !== py.toLowerCase()) {{
+                        matches = matches.concat(dict[key].slice(0, 2));
+                    }}
                 }}
+                return matches.slice(0, 8);
             }}
-            return matches.slice(0, 8);
         }}
         
         function showCandidates(result) {{
