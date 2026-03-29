@@ -1781,25 +1781,20 @@ class MapWidget(QWidget):
             
             if (!candidates || candidates.length === 0) return;
             
-            // 创建行容器
-            var rowDiv = document.createElement('div');
-            rowDiv.style.display = 'flex';
-            rowDiv.style.flexWrap = 'wrap';
-            rowDiv.style.gap = '4px';
-            rowDiv.style.alignItems = 'center';
+            // 创建外层容器，使用space-between布局
+            var wrapperDiv = document.createElement('div');
+            wrapperDiv.style.display = 'flex';
+            wrapperDiv.style.justifyContent = 'space-between';
+            wrapperDiv.style.alignItems = 'center';
+            wrapperDiv.style.width = '100%';
             
-            // 如果不是第一页，显示 << 按钮
-            if (currentPage > 0) {{
-                var prevBtn = document.createElement('button');
-                prevBtn.className = 'candidate-item more-btn';
-                prevBtn.textContent = '<<';
-                prevBtn.style.background = '#4DB8FF';
-                prevBtn.style.color = '#fff';
-                prevBtn.onclick = function() {{ 
-                    fetchCandidates(currentCandidatePage - 1);
-                }};
-                rowDiv.appendChild(prevBtn);
-            }}
+            // 左侧容器：候选词
+            var candidatesDiv = document.createElement('div');
+            candidatesDiv.style.display = 'flex';
+            candidatesDiv.style.flexWrap = 'wrap';
+            candidatesDiv.style.gap = '4px';
+            candidatesDiv.style.alignItems = 'center';
+            candidatesDiv.style.flex = '1';
             
             // 添加候选词按钮（最多5个）
             candidates.slice(0, 5).forEach(function(ch) {{
@@ -1807,23 +1802,41 @@ class MapWidget(QWidget):
                 btn.className = 'candidate-item';
                 btn.textContent = ch;
                 btn.onclick = function() {{ selectCandidate(ch); }};
-                rowDiv.appendChild(btn);
+                candidatesDiv.appendChild(btn);
             }});
+            
+            // 右侧容器：翻页按钮（固定在最右边）
+            var buttonsDiv = document.createElement('div');
+            buttonsDiv.style.display = 'flex';
+            buttonsDiv.style.gap = '4px';
+            buttonsDiv.style.alignItems = 'center';
+            buttonsDiv.style.marginLeft = '8px';
+            
+            // 如果不是第一页，显示 << 按钮
+            if (currentPage > 0) {{
+                var prevBtn = document.createElement('button');
+                prevBtn.className = 'candidate-item more-btn';
+                prevBtn.textContent = '<<';
+                prevBtn.onclick = function() {{ 
+                    fetchCandidates(currentCandidatePage - 1);
+                }};
+                buttonsDiv.appendChild(prevBtn);
+            }}
             
             // 如果有更多候选词，显示 >> 按钮
             if (hasMore) {{
                 var moreBtn = document.createElement('button');
                 moreBtn.className = 'candidate-item more-btn';
                 moreBtn.textContent = '>>';
-                moreBtn.style.background = '#4DB8FF';
-                moreBtn.style.color = '#fff';
                 moreBtn.onclick = function() {{ 
                     fetchCandidates(currentCandidatePage + 1);
                 }};
-                rowDiv.appendChild(moreBtn);
+                buttonsDiv.appendChild(moreBtn);
             }}
             
-            container.appendChild(rowDiv);
+            wrapperDiv.appendChild(candidatesDiv);
+            wrapperDiv.appendChild(buttonsDiv);
+            container.appendChild(wrapperDiv);
         }}
         
         function selectCandidate(ch) {{
