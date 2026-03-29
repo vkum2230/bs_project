@@ -731,11 +731,8 @@ class BikeComputerPro(QWidget):
             text: 消息内容
             icon: 消息图标
         """
-        from datetime import datetime
-        
-        # 添加时间戳
-        time_str = datetime.now().strftime("%H:%M:%S")
-        message = f"{icon} [{time_str}] {text}"
+        # 使用 > 符号作为前缀，不显示时间戳
+        message = f"> {text}"
         
         # 添加到历史
         self.voice_messages.append(message)
@@ -754,10 +751,7 @@ class BikeComputerPro(QWidget):
         """播放欢迎语音"""
         print("[Voice] 播放欢迎语音...")
         
-        # 显示到消息框
-        self.add_voice_message("你好，我是骑行小智", icon="🤖")
-        
-        # 语音播报
+        # 语音播报（会自动通过 message_callback 显示到消息框）
         if self.voice_player:
             try:
                 result = self.voice_player.speak("你好，我是骑行小智", block=False)
