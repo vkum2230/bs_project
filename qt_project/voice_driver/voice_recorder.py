@@ -351,7 +351,8 @@ class ButtonVoiceAssistant:
     def __init__(self,
                  voice_player,
                  message_callback: Callable[[str, str], None],
-                 button_pin: int = 17):
+                 button_pin: int = 17,
+                 ollama_client = None):
         """
         初始化助手
         
@@ -359,10 +360,12 @@ class ButtonVoiceAssistant:
             voice_player: 语音播放器实例
             message_callback: 消息回调函数 (text, icon) -> None
             button_pin: 按钮 GPIO 引脚
+            ollama_client: Ollama 大模型客户端（可选）
         """
         self.voice_player = voice_player
         self.message_callback = message_callback
         self.button_pin = button_pin
+        self.ollama_client = ollama_client
         
         self.recorder = VoiceRecorder()
         self.recognizer = VoiceRecognizer()
@@ -438,7 +441,7 @@ class ButtonVoiceAssistant:
         thread.start()
     
     def _process_recording(self, wav_path: str):
-        """处理录音（识别+播报）"""
+        """处理录音（识别+大模型处理+播报）"""
         try:
             # 1. 语音识别
             result = self.recognizer.recognize(wav_path)
@@ -448,17 +451,28 @@ class ButtonVoiceAssistant:
                 # 去掉空格，使语音连贯
                 clean_text = result.text.replace(" ", "").replace("  ", "")
                 
-                # 显示识别结果（不显示"你说"）
-                if self.message_callback:
-                    self.message_callback(clean_text, icon="💬")
-                
                 print(f"[ButtonVoiceAssistant] 识别结果: {clean_text} (置信度: {result.confidence:.2f})")
                 
-                # 3. 语音播报识别结果（使用去掉空格的文本，不重复显示UI）
-                if self.voice_player and result.confidence > 0.3:
-                    speak_text = clean_text[:50]  # 限制长度
-                    # 设置 show_in_ui=False，避免重复显示（已经在上面显示过了）
-                    self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+                # 3. 调用 Ollama 大模型处理（异步，不阻塞）
+                if hasattr(self, 'ollama_client') and self.ollama_client and result.confidence > 0.3:
+                    # 显示"思考中"提示
+                    if self.message_callback:
+                        self.message_callback(f"> {clean_text}", icon="💬")
+                    
+                    # 异步调用大模型
+                    self.ollama_client.chat_async(
+                        prompt=clean_text,
+                        callback=lambda response: self._handle_ollama_response(response),
+                        system_prompt="你是骑行助手小智，回答简洁，适合骑行时听取。"
+                    )
+                else:
+                    # 没有 Ollama 时，直接显示识别结果
+                    if self.message_callback:
+                        self.message_callback(f"> {clean_text}", icon="💬")
+                    
+                    # 直接播报识别结果
+                    if self.voice_player and result.confidence > 0.3:
+                        self.voice_player.speak(clean_text[:50], block=False, show_in_ui=False)
             else:
                 if self.message_callback:
                     self.message_callback("❌ 未能识别语音", icon="⚠️")
@@ -473,6 +487,24 @@ class ButtonVoiceAssistant:
             print(f"[ButtonVoiceAssistant] 处理录音失败: {e}")
             if self.message_callback:
                 self.message_callback(f"❌ 处理失败: {str(e)}", icon="⚠️")
+    
+    def _handle_ollama_response(self, response: str):
+        """处理 Ollama 大模型返回的结果"""
+        try:
+            print(f"[ButtonVoiceAssistant] 大模型回复: {response}")
+            
+            # 显示模型回复到消息框
+            if self.message_callback:
+                self.message_callback(response, icon="🤖")
+            
+            # 语音播报模型回复
+            if self.voice_player:
+                # 限制长度，避免太长
+                speak_text = response[:100] if len(response) > 100 else response
+                self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+                
+        except Exception as e:
+            print(f"[ButtonVoiceAssistant] 处理大模型回复失败: {e}")
     
     def stop(self):
         """停止助手"""

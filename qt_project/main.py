@@ -19,6 +19,7 @@ from location_service import LocationService
 from map_widget import MapWidget
 from voice_driver import VoicePlayer, LEDController
 from voice_driver.voice_recorder import ButtonVoiceAssistant
+from ollama_client import OllamaClient, DEFAULT_SYSTEM_PROMPT
 
 
 class SerialDebugger:
@@ -298,6 +299,18 @@ class BikeComputerPro(QWidget):
         except Exception as e:
             print(f"[Main] LED 控制器初始化失败: {e}")
         
+        # 初始化 Ollama 大模型客户端
+        self.ollama_client = None
+        try:
+            self.ollama_client = OllamaClient(model_name="my-llama")
+            if self.ollama_client.check_available():
+                print("[Main] Ollama 大模型连接成功")
+            else:
+                print("[Main] Ollama 服务未运行，大模型功能不可用")
+                self.ollama_client = None
+        except Exception as e:
+            print(f"[Main] Ollama 客户端初始化失败: {e}")
+        
         # 按钮语音助手（按住说话功能）
         self.voice_assistant = None
         if self.voice_player:
@@ -305,9 +318,10 @@ class BikeComputerPro(QWidget):
                 self.voice_assistant = ButtonVoiceAssistant(
                     voice_player=self.voice_player,
                     message_callback=self.add_voice_message,
-                    button_pin=17
+                    button_pin=17,
+                    ollama_client=self.ollama_client  # 传入大模型客户端
                 )
-                print("[Main] 按钮语音助手初始化成功")
+                print("[Main] 按钮语音助手初始化成功（已集成大模型）")
                 print("[Main] 按住 ReSpeaker 按钮开始录音，松开结束")
             except Exception as e:
                 print(f"[Main] 按钮语音助手初始化失败: {e}")
