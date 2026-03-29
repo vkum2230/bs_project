@@ -319,10 +319,11 @@ class BikeComputerPro(QWidget):
                     voice_player=self.voice_player,
                     message_callback=self.add_voice_message,
                     button_pin=17,
-                    ollama_client=self.ollama_client  # 传入大模型客户端
+                    ollama_client=self.ollama_client,  # 传入大模型客户端
+                    led_controller=self.led_controller  # 传入 LED 控制器
                 )
                 print("[Main] 按钮语音助手初始化成功（已集成大模型）")
-                print("[Main] 按住 ReSpeaker 按钮开始录音，松开结束")
+                print("[Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）")
             except Exception as e:
                 print(f"[Main] 按钮语音助手初始化失败: {e}")
         # ==================================
@@ -532,9 +533,9 @@ class BikeComputerPro(QWidget):
         self.dialog_msg.setWordWrap(True)  # 启用自动换行
         box_layout.addWidget(self.dialog_msg)
         
-        # 语音消息历史（最多显示最近5条）
+        # 语音消息历史（最多显示最近3条，避免超出界面）
         self.voice_messages = []
-        self.max_voice_messages = 5
+        self.max_voice_messages = 3
         
         dialog_layout.addWidget(self.dialog_box)
 

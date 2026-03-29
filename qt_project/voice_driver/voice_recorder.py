@@ -352,7 +352,8 @@ class ButtonVoiceAssistant:
                  voice_player,
                  message_callback: Callable[[str, str], None],
                  button_pin: int = 17,
-                 ollama_client = None):
+                 ollama_client = None,
+                 led_controller = None):
         """
         初始化助手
         
@@ -361,11 +362,13 @@ class ButtonVoiceAssistant:
             message_callback: 消息回调函数 (text, icon) -> None
             button_pin: 按钮 GPIO 引脚
             ollama_client: Ollama 大模型客户端（可选）
+            led_controller: LED 控制器（可选，用于按钮状态指示）
         """
         self.voice_player = voice_player
         self.message_callback = message_callback
         self.button_pin = button_pin
         self.ollama_client = ollama_client
+        self.led_controller = led_controller
         
         self.recorder = VoiceRecorder()
         self.recognizer = VoiceRecognizer()
@@ -402,19 +405,25 @@ class ButtonVoiceAssistant:
         
         print("[ButtonVoiceAssistant] 按钮按下 - 开始录音")
         
-        # 显示录音提示
-        if self.message_callback:
-            self.message_callback("🎤 正在录音...请说话", icon="🔴")
+        # LED 变红色（录音中）
+        if self.led_controller:
+            try:
+                self.led_controller.set_all(self.led_controller.COLOR_RED)
+            except Exception as e:
+                print(f"[ButtonVoiceAssistant] LED 设置失败: {e}")
         
         # 开始录音
         success = self.recorder.start_recording()
         
         if success:
             self._recording_indicator = True
-            # 可选：播放提示音
-            # if self.voice_player:
-            #     self.voice_player.speak("开始录音", block=False)
         else:
+            # 录音失败，LED 恢复
+            if self.led_controller:
+                try:
+                    self.led_controller.set_all(self.led_controller.COLOR_GREEN)
+                except:
+                    pass
             if self.message_callback:
                 self.message_callback("❌ 录音启动失败", icon="⚠️")
     
@@ -429,12 +438,18 @@ class ButtonVoiceAssistant:
         wav_path = self.recorder.stop_recording()
         self._recording_indicator = False
         
+        # LED 变绿色（处理中）
+        if self.led_controller:
+            try:
+                self.led_controller.set_all(self.led_controller.COLOR_GREEN)
+            except Exception as e:
+                print(f"[ButtonVoiceAssistant] LED 设置失败: {e}")
+        
         if not wav_path:
             if self.message_callback:
                 self.message_callback("❌ 录音失败", icon="⚠️")
             return
         
-        # 不显示"识别中"，直接启动识别线程
         # 启动识别线程
         thread = threading.Thread(target=self._process_recording, args=(wav_path,))
         thread.daemon = True
