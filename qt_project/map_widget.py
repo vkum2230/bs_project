@@ -1736,6 +1736,7 @@ class MapWidget(QWidget):
             // 处理返回值（可能是数组或对象）
             var candidates = [];
             var hasMore = false;
+            var currentPage = 0;
             
             if (Array.isArray(result)) {{
                 // 兼容旧格式（数组）
@@ -1744,6 +1745,7 @@ class MapWidget(QWidget):
                 // 新格式（分页对象）
                 candidates = result.candidates;
                 hasMore = result.has_more;
+                currentPage = result.page || 0;
             }}
             
             if (!candidates || candidates.length === 0) return;
@@ -1755,8 +1757,21 @@ class MapWidget(QWidget):
             rowDiv.style.gap = '4px';
             rowDiv.style.alignItems = 'center';
             
-            // 添加候选词按钮（每行最多5个）
-            candidates.slice(0, 5).forEach(function(ch) {{
+            // 如果不是第一页，显示 << 按钮
+            if (currentPage > 0) {{
+                var prevBtn = document.createElement('button');
+                prevBtn.className = 'candidate-item more-btn';
+                prevBtn.textContent = '<<';
+                prevBtn.style.background = '#4DB8FF';
+                prevBtn.style.color = '#fff';
+                prevBtn.onclick = function() {{ 
+                    fetchCandidates(currentCandidatePage - 1);
+                }};
+                rowDiv.appendChild(prevBtn);
+            }}
+            
+            // 添加候选词按钮（最多5个）
+            candidates.forEach(function(ch) {{
                 var btn = document.createElement('button');
                 btn.className = 'candidate-item';
                 btn.textContent = ch;
@@ -1765,7 +1780,7 @@ class MapWidget(QWidget):
             }});
             
             // 如果有更多候选词，显示 >> 按钮
-            if (hasMore || candidates.length > 5) {{
+            if (hasMore) {{
                 var moreBtn = document.createElement('button');
                 moreBtn.className = 'candidate-item more-btn';
                 moreBtn.textContent = '>>';
@@ -1778,25 +1793,6 @@ class MapWidget(QWidget):
             }}
             
             container.appendChild(rowDiv);
-            
-            // 如果有超过5个候选词，显示第二行
-            if (candidates.length > 5) {{
-                var rowDiv2 = document.createElement('div');
-                rowDiv2.style.display = 'flex';
-                rowDiv2.style.flexWrap = 'wrap';
-                rowDiv2.style.gap = '4px';
-                rowDiv2.style.marginTop = '4px';
-                
-                candidates.slice(5, 10).forEach(function(ch) {{
-                    var btn = document.createElement('button');
-                    btn.className = 'candidate-item';
-                    btn.textContent = ch;
-                    btn.onclick = function() {{ selectCandidate(ch); }};
-                    rowDiv2.appendChild(btn);
-                }});
-                
-                container.appendChild(rowDiv2);
-            }}
         }}
         
         function selectCandidate(ch) {{
