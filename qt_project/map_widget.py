@@ -596,10 +596,14 @@ class MapWidget(QWidget):
         self.web_view = QWebEngineView()
         
         # 配置 WebEngine
-        from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+        from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineProfile
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.FocusOnNavigationEnabled, False)
+        settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
+        
+        # 配置页面禁用缓存（开发调试用）
+        self.web_view.page().profile().setHttpCacheType(QWebEngineProfile.NoCache)
         
         self.channel = QWebChannel()
         self.channel.registerObject('pinyinHandler', self.pinyin_handler)
@@ -852,6 +856,17 @@ class MapWidget(QWidget):
             border-color: #4DB8FF;
         }}
         .candidate-item:active {{ transform: scale(0.95); }}
+        
+        /* 翻页按钮样式 */
+        .more-btn {{
+            background: #4DB8FF !important;
+            color: #fff !important;
+            font-weight: bold;
+            min-width: 40px;
+        }}
+        .more-btn:hover {{
+            background: #3AA8F0 !important;
+        }}
         
         /* 键盘主体 - 半透明灰色背景 */
         .keyboard-main {{
@@ -1748,13 +1763,14 @@ class MapWidget(QWidget):
             if (Array.isArray(result)) {{
                 // 兼容旧格式（数组）
                 candidates = result;
-                console.log('[IME] Received array format, length:', candidates.length);
+                console.log('[IME] Array format, length:', candidates.length);
             }} else if (result && result.candidates) {{
                 // 新格式（分页对象）
                 candidates = result.candidates;
                 hasMore = result.has_more;
                 currentPage = result.page || 0;
-                console.log('[IME] Received object format, page:', currentPage, 'candidates:', candidates.length, 'hasMore:', hasMore);
+                console.log('[IME] Object: page=' + currentPage + ', count=' + candidates.length + ', hasMore=' + hasMore);
+                console.log('[IME] Raw result:', JSON.stringify(result));
             }}
             
             if (!candidates || candidates.length === 0) return;
