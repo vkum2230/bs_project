@@ -120,49 +120,66 @@ class OllamaClient:
         """
         def _do_stream():
             try:
+                print(f"[OllamaClient] 开始流式请求，模型: {self.model_name}, 提示: {prompt[:30]}...")
+                
                 data = {
                     "model": self.model_name,
                     "prompt": prompt,
                     "stream": True,  # 流式输出
                     "options": {
                         "num_predict": max_tokens,
-                        "temperature": 0.3,  # 降低温度，回复更确定更快
-                        "top_k": 20,  # 减少候选，加快速度
+                        "temperature": 0.3,
+                        "top_k": 20,
                         "top_p": 0.8,
-                        "repeat_penalty": 1.2,  # 减少重复
-                        "num_ctx": 1024,  # 减少上下文窗口，节省内存
+                        "repeat_penalty": 1.2,
+                        "num_ctx": 1024,
                     }
                 }
                 
                 if system_prompt:
                     data["system"] = system_prompt
+                    print(f"[OllamaClient] 使用系统提示词: {system_prompt[:50]}...")
                 
                 full_response = ""
+                token_count = 0
+                
+                print("[OllamaClient] 发送请求...")
                 response = requests.post(
                     self.api_url,
                     json=data,
-                    stream=True,  # 流式接收
-                    timeout=10  # 10秒超时，更快失败
+                    stream=True,
+                    timeout=10
                 )
+                print(f"[OllamaClient] 收到响应，状态码: {response.status_code}")
                 
                 for line in response.iter_lines():
                     if line:
                         try:
-                            json_line = json.loads(line)
+                            line_str = line.decode('utf-8')
+                            json_line = json.loads(line_str)
                             token = json_line.get("response", "")
+                            
                             if token:
                                 full_response += token
-                                on_token(token)  # 实时回调
+                                token_count += 1
+                                on_token(token)
+                                
+                                # 每10个token打印一次
+                                if token_count % 10 == 0:
+                                    print(f"[OllamaClient] 已生成 {token_count} 个token")
                             
-                            # 检查是否完成
                             if json_line.get("done", False):
+                                print(f"[OllamaClient] 生成完成，共 {token_count} 个token")
                                 break
-                        except:
+                        except Exception as parse_err:
+                            print(f"[OllamaClient] 解析行错误: {parse_err}, 行内容: {line[:100]}")
                             pass
                 
-                # 如果回复为空，给一个默认回复
                 if not full_response.strip():
+                    print("[OllamaClient] 警告: 回复为空")
                     full_response = "抱歉，我没听清。"
+                else:
+                    print(f"[OllamaClient] 完整回复: {full_response[:100]}...")
                     
                 on_complete(full_response.strip())
                 

@@ -375,6 +375,7 @@ class ButtonVoiceAssistant:
         self.button_handler = None
         
         self._recording_indicator = False
+        self._current_response = ""  # 用于流式输出累积回复
         
         self._init_button()
     
@@ -472,6 +473,8 @@ class ButtonVoiceAssistant:
                 
                 # 3. 调用 Ollama 大模型处理（流式输出，边生成边显示）
                 if hasattr(self, 'ollama_client') and self.ollama_client and result.confidence > 0.3:
+                    print(f"[ButtonVoiceAssistant] 开始调用大模型: {clean_text}")
+                    
                     # 先显示用户说的话
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
@@ -486,6 +489,7 @@ class ButtonVoiceAssistant:
                         max_tokens=60  # 进一步限制，约30个汉字
                     )
                 else:
+                    print(f"[ButtonVoiceAssistant] 没有Ollama客户端或置信度太低，直接播报")
                     # 没有 Ollama 时，直接显示识别结果
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
@@ -493,6 +497,13 @@ class ButtonVoiceAssistant:
                     # 直接播报识别结果
                     if self.voice_player and result.confidence > 0.3:
                         self.voice_player.speak(clean_text[:50], block=False, show_in_ui=False)
+                    
+                    # LED 恢复
+                    if self.led_controller:
+                        try:
+                            self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
+                        except:
+                            pass
             else:
                 if self.message_callback:
                     self.message_callback("❌ 未能识别语音", icon="⚠️")
