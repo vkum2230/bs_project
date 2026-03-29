@@ -27,31 +27,31 @@ class OllamaClient:
         self.api_url = f"{host}/api/generate"
         
     def chat(self, prompt: str, system_prompt: str = None, 
-             max_tokens: int = 100, temperature: float = 0.7) -> str:
+             max_tokens: int = 60) -> str:
         """
-        发送对话请求（快速模式）
+        发送对话请求（极速模式）
         
         Args:
             prompt: 用户输入
             system_prompt: 系统提示词
-            max_tokens: 最大生成token数（默认100，约50个汉字）
-            temperature: 创造性程度（越低越快，默认0.7）
+            max_tokens: 最大生成token数（默认60，约30个汉字）
             
         Returns:
             模型回复文本
         """
         try:
-            # 构建请求数据（优化参数）
+            # 构建请求数据（极速参数）
             data = {
                 "model": self.model_name,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
                     "num_predict": max_tokens,  # 限制生成长度
-                    "temperature": temperature,  # 降低创造性，提高速度
-                    "top_k": 40,  # 降低采样范围
-                    "top_p": 0.9,
-                    "repeat_penalty": 1.1
+                    "temperature": 0.3,  # 低温度，更确定更快
+                    "top_k": 20,  # 减少候选
+                    "top_p": 0.8,
+                    "repeat_penalty": 1.2,
+                    "num_ctx": 1024,  # 减少上下文
                 }
             }
             
@@ -59,16 +59,17 @@ class OllamaClient:
             if system_prompt:
                 data["system"] = system_prompt
             
-            # 发送请求（缩短超时）
+            # 发送请求（更短超时）
             response = requests.post(
                 self.api_url,
                 json=data,
-                timeout=15  # 15秒超时，避免等待太久
+                timeout=10  # 10秒超时
             )
             
             if response.status_code == 200:
                 result = response.json()
-                return result.get("response", "").strip()
+                reply = result.get("response", "").strip()
+                return reply if reply else "抱歉，我没听清。"
             else:
                 print(f"[OllamaClient] 请求失败: {response.status_code}")
                 return "抱歉，我现在无法回答。"
@@ -78,7 +79,7 @@ class OllamaClient:
             return "抱歉，我的大脑离线了。"
         except requests.exceptions.Timeout:
             print("[OllamaClient] 请求超时")
-            return "抱歉，我思考太久了。"
+            return "抱歉，我反应慢了。"
         except Exception as e:
             print(f"[OllamaClient] 错误: {e}")
             return "抱歉，出错了。"
@@ -106,16 +107,16 @@ class OllamaClient:
                     on_token: Callable[[str], None],
                     on_complete: Callable[[str], None],
                     system_prompt: str = None,
-                    max_tokens: int = 100):
+                    max_tokens: int = 60):
         """
-        流式对话（边生成边返回，体验更好）
+        流式对话（边生成边返回，更快响应）
         
         Args:
             prompt: 用户输入
             on_token: 收到每个token时的回调
             on_complete: 完成时的回调（接收完整文本）
             system_prompt: 系统提示词
-            max_tokens: 最大生成长度
+            max_tokens: 最大生成长度（默认60，约30个汉字）
         """
         def _do_stream():
             try:
@@ -125,9 +126,11 @@ class OllamaClient:
                     "stream": True,  # 流式输出
                     "options": {
                         "num_predict": max_tokens,
-                        "temperature": 0.7,
-                        "top_k": 40,
-                        "top_p": 0.9
+                        "temperature": 0.3,  # 降低温度，回复更确定更快
+                        "top_k": 20,  # 减少候选，加快速度
+                        "top_p": 0.8,
+                        "repeat_penalty": 1.2,  # 减少重复
+                        "num_ctx": 1024,  # 减少上下文窗口，节省内存
                     }
                 }
                 
@@ -139,7 +142,7 @@ class OllamaClient:
                     self.api_url,
                     json=data,
                     stream=True,  # 流式接收
-                    timeout=15
+                    timeout=10  # 10秒超时，更快失败
                 )
                 
                 for line in response.iter_lines():
@@ -157,8 +160,15 @@ class OllamaClient:
                         except:
                             pass
                 
+                # 如果回复为空，给一个默认回复
+                if not full_response.strip():
+                    full_response = "抱歉，我没听清。"
+                    
                 on_complete(full_response.strip())
                 
+            except requests.exceptions.Timeout:
+                print("[OllamaClient] 流式请求超时")
+                on_complete("抱歉，我反应慢了。")
             except Exception as e:
                 print(f"[OllamaClient] 流式请求错误: {e}")
                 on_complete("抱歉，出错了。")

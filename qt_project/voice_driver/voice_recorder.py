@@ -409,6 +409,7 @@ class ButtonVoiceAssistant:
         if self.led_controller:
             try:
                 self.led_controller.set_all(self.led_controller.COLOR_RED)
+                print("[ButtonVoiceAssistant] LED 已设置为红色（录音中）")
             except Exception as e:
                 print(f"[ButtonVoiceAssistant] LED 设置失败: {e}")
         
@@ -442,6 +443,7 @@ class ButtonVoiceAssistant:
         if self.led_controller:
             try:
                 self.led_controller.set_all(self.led_controller.COLOR_GREEN)
+                print("[ButtonVoiceAssistant] LED 已设置为绿色（处理中）")
             except Exception as e:
                 print(f"[ButtonVoiceAssistant] LED 设置失败: {e}")
         
@@ -468,18 +470,20 @@ class ButtonVoiceAssistant:
                 
                 print(f"[ButtonVoiceAssistant] 识别结果: {clean_text} (置信度: {result.confidence:.2f})")
                 
-                # 3. 调用 Ollama 大模型处理（异步，不阻塞，限制长度）
+                # 3. 调用 Ollama 大模型处理（流式输出，边生成边显示）
                 if hasattr(self, 'ollama_client') and self.ollama_client and result.confidence > 0.3:
-                    # 显示"思考中"提示
+                    # 先显示用户说的话
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
                     
-                    # 异步调用大模型（限制最多80个token，约40个汉字，更快）
-                    self.ollama_client.chat_async(
+                    # 使用流式输出，边生成边显示和播报
+                    self._current_response = ""  # 累积完整回复
+                    self.ollama_client.chat_stream(
                         prompt=clean_text,
-                        callback=lambda response: self._handle_ollama_response(response),
-                        system_prompt="你是骑行助手小智，回答简洁，适合骑行时听取。",
-                        max_tokens=80  # 限制生成长度，提高速度
+                        on_token=lambda token: self._on_stream_token(token),
+                        on_complete=lambda full: self._on_stream_complete(full),
+                        system_prompt="你是骑行助手。用户问骑行相关问题，你给出简短建议。不相关的问题简单回答。控制在30字以内。",
+                        max_tokens=60  # 进一步限制，约30个汉字
                     )
                 else:
                     # 没有 Ollama 时，直接显示识别结果
@@ -504,8 +508,49 @@ class ButtonVoiceAssistant:
             if self.message_callback:
                 self.message_callback(f"❌ 处理失败: {str(e)}", icon="⚠️")
     
+    def _on_stream_token(self, token: str):
+        """流式输出 - 收到每个token时调用"""
+        self._current_response += token
+        # 实时更新显示（可选，避免闪烁可以只更新最后一条）
+        # 这里我们只累积，不实时更新UI，避免闪烁
+        
+    def _on_stream_complete(self, response: str):
+        """流式输出完成 - 显示并播报"""
+        try:
+            print(f"[ButtonVoiceAssistant] 大模型回复: {response}")
+            
+            # 如果回复为空或超时提示，不显示
+            if not response or "抱歉" in response:
+                # LED 恢复呼吸灯状态
+                if self.led_controller:
+                    try:
+                        self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
+                    except:
+                        pass
+                return
+            
+            # 显示模型回复到消息框
+            if self.message_callback:
+                self.message_callback(response, icon="🤖")
+            
+            # 语音播报模型回复
+            if self.voice_player:
+                # 限制长度，避免太长
+                speak_text = response[:80] if len(response) > 80 else response
+                self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+            
+            # LED 恢复呼吸灯状态
+            if self.led_controller:
+                try:
+                    self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
+                except:
+                    pass
+                
+        except Exception as e:
+            print(f"[ButtonVoiceAssistant] 处理大模型回复失败: {e}")
+    
     def _handle_ollama_response(self, response: str):
-        """处理 Ollama 大模型返回的结果"""
+        """处理 Ollama 大模型返回的结果（非流式，备用）"""
         try:
             print(f"[ButtonVoiceAssistant] 大模型回复: {response}")
             
@@ -515,9 +560,15 @@ class ButtonVoiceAssistant:
             
             # 语音播报模型回复
             if self.voice_player:
-                # 限制长度，避免太长
-                speak_text = response[:100] if len(response) > 100 else response
+                speak_text = response[:80] if len(response) > 80 else response
                 self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+            
+            # LED 恢复呼吸灯状态
+            if self.led_controller:
+                try:
+                    self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
+                except:
+                    pass
                 
         except Exception as e:
             print(f"[ButtonVoiceAssistant] 处理大模型回复失败: {e}")
