@@ -1192,9 +1192,10 @@ class MapWidget(QWidget):
                         if (data.status === '1' && data.regeocode) {{
                             var address = data.regeocode.formatted_address;
                             var comp = data.regeocode.addressComponent;
-                            var district = comp.district || '';
-                            var street = comp.street || '';
-                            var number = comp.streetNumber || '';
+                            // 确保获取字符串值（防止某些字段是对象）
+                            var district = (comp.district && typeof comp.district === 'string') ? comp.district : '';
+                            var street = (comp.street && typeof comp.street === 'string') ? comp.street : '';
+                            var number = (comp.streetNumber && typeof comp.streetNumber === 'string') ? comp.streetNumber : '';
                             var shortAddress = district + street + number;
                             if (!shortAddress) shortAddress = address;
                             
