@@ -59,11 +59,11 @@ class OllamaClient:
             if system_prompt:
                 data["system"] = system_prompt
             
-            # 发送请求（更短超时）
+            # 发送请求（树莓派需要较长时间）
             response = requests.post(
                 self.api_url,
                 json=data,
-                timeout=10  # 10秒超时
+                timeout=30  # 30秒超时
             )
             
             if response.status_code == 200:
@@ -148,7 +148,7 @@ class OllamaClient:
                     self.api_url,
                     json=data,
                     stream=True,
-                    timeout=10
+                    timeout=30  # 30秒超时，树莓派需要更长时间
                 )
                 print(f"[OllamaClient] 收到响应，状态码: {response.status_code}")
                 
@@ -184,8 +184,8 @@ class OllamaClient:
                 on_complete(full_response.strip())
                 
             except requests.exceptions.Timeout:
-                print("[OllamaClient] 流式请求超时")
-                on_complete("抱歉，我反应慢了。")
+                print("[OllamaClient] 流式请求超时（30秒）")
+                on_complete("抱歉，我想得太久了，请再说一次。")
             except Exception as e:
                 print(f"[OllamaClient] 流式请求错误: {e}")
                 on_complete("抱歉，出错了。")
