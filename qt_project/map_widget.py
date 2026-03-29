@@ -13,7 +13,7 @@ import json
 
 # 导入智能拼音输入法
 try:
-    from smart_pinyin_ime import get_ime
+    from .smart_pinyin_ime import get_ime
     _HAS_SMART_IME = True
 except ImportError:
     _HAS_SMART_IME = False
@@ -122,7 +122,7 @@ class AMapAPIHandler(QObject):
 
 
 class PinyinHandler(QObject):
-    """拼音处理后端 - 使用智能拼音输入法"""
+    """拼音处理后端 - 使用智能拼音输入法，支持分页"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,26 +133,47 @@ class PinyinHandler(QObject):
                 print("[PinyinHandler] 智能拼音输入法初始化成功")
             except Exception as e:
                 print(f"[PinyinHandler] 智能输入法初始化失败: {e}")
+        self._page_size = 5  # 每页5个候选词
         
-    @pyqtSlot(str, result='QVariantList')
-    def get_candidates(self, pinyin):
-        """根据拼音获取候选汉字/词组"""
+    @pyqtSlot(str, int, result='QVariantMap')
+    def get_candidates(self, pinyin, page=0):
+        """
+        根据拼音获取候选汉字/词组（支持分页）
+        
+        Args:
+            pinyin: 输入的拼音
+            page: 页码（从0开始）
+            
+        Returns:
+            dict: {
+                "candidates": [当前页的候选词列表],
+                "total": 总候选词数,
+                "has_more": 是否有更多页,
+                "page": 当前页码
+            }
+        """
         if not pinyin:
-            return []
+            return {"candidates": [], "total": 0, "has_more": False, "page": 0}
         
         pinyin = pinyin.lower().strip()
         
         # 使用智能输入法（如果可用）
         if self._ime:
             try:
-                candidates = self._ime.get_candidates(pinyin)
-                if candidates:
-                    return candidates
+                # 当翻页时，加载全库汉字以获取更多候选
+                result = self._ime.get_candidates(pinyin, page, load_full=(page > 0))
+                return result
             except Exception as e:
                 print(f"[PinyinHandler] 智能输入法查询失败: {e}")
         
-        # 回退到基础词典
-        return self._get_basic_candidates(pinyin)
+        # 回退到基础词典（不分页）
+        candidates = self._get_basic_candidates(pinyin)
+        return {
+            "candidates": candidates,
+            "total": len(candidates),
+            "has_more": False,
+            "page": 0
+        }
     
     def _get_basic_candidates(self, pinyin):
         """基础词典（作为备用）"""
@@ -1293,21 +1314,24 @@ class MapWidget(QWidget):
             }}
         }}
         
-        function fetchCandidates() {{
-            var candidates = getCandidatesFromDict(pinyinBuffer);
-            showCandidates(candidates);
+        var currentCandidatePage = 0;  // 当前候选词页码
+        
+        function fetchCandidates(page) {{
+            if (page === undefined) page = 0;
+            currentCandidatePage = page;
+            getCandidatesFromDict(pinyinBuffer, page);
         }}
         
-        function getCandidatesFromDict(py) {{
+        function getCandidatesFromDict(py, page) {{
             if (pinyinHandler) {{
-                pinyinHandler.get_candidates(py).then(function(result) {{
+                pinyinHandler.get_candidates(py, page).then(function(result) {{
                     showCandidates(result);
                 }}).catch(function(err) {{
                     console.error('获取候选词失败:', err);
                 }});
-            }}
-            
-            var dict = {{
+            }} else {{
+                // 备用词典（不分页）
+                var dict = {{
                 'a': ['阿','啊','安','岸','按','案','暗'],
                 'ai': ['哀','埃','挨','爱'],
                 'an': ['安','岸','按','案','暗'],
@@ -1704,25 +1728,81 @@ class MapWidget(QWidget):
             return matches.slice(0, 8);
         }}
         
-        function showCandidates(chars) {{
+        function showCandidates(result) {{
             var container = document.getElementById('candidatesContainer');
             container.innerHTML = '';
             
-            if (!chars || chars.length === 0) return;
+            // 处理返回值（可能是数组或对象）
+            var candidates = [];
+            var hasMore = false;
             
-            chars.forEach(function(ch) {{
+            if (Array.isArray(result)) {{
+                // 兼容旧格式（数组）
+                candidates = result;
+            }} else if (result && result.candidates) {{
+                // 新格式（分页对象）
+                candidates = result.candidates;
+                hasMore = result.has_more;
+            }}
+            
+            if (!candidates || candidates.length === 0) return;
+            
+            // 创建行容器
+            var rowDiv = document.createElement('div');
+            rowDiv.style.display = 'flex';
+            rowDiv.style.flexWrap = 'wrap';
+            rowDiv.style.gap = '4px';
+            rowDiv.style.alignItems = 'center';
+            
+            // 添加候选词按钮（每行最多5个）
+            candidates.slice(0, 5).forEach(function(ch) {{
                 var btn = document.createElement('button');
                 btn.className = 'candidate-item';
                 btn.textContent = ch;
                 btn.onclick = function() {{ selectCandidate(ch); }};
-                container.appendChild(btn);
+                rowDiv.appendChild(btn);
             }});
+            
+            // 如果有更多候选词，显示 >> 按钮
+            if (hasMore || candidates.length > 5) {{
+                var moreBtn = document.createElement('button');
+                moreBtn.className = 'candidate-item more-btn';
+                moreBtn.textContent = '>>';
+                moreBtn.style.background = '#4DB8FF';
+                moreBtn.style.color = '#fff';
+                moreBtn.onclick = function() {{ 
+                    fetchCandidates(currentCandidatePage + 1);
+                }};
+                rowDiv.appendChild(moreBtn);
+            }}
+            
+            container.appendChild(rowDiv);
+            
+            // 如果有超过5个候选词，显示第二行
+            if (candidates.length > 5) {{
+                var rowDiv2 = document.createElement('div');
+                rowDiv2.style.display = 'flex';
+                rowDiv2.style.flexWrap = 'wrap';
+                rowDiv2.style.gap = '4px';
+                rowDiv2.style.marginTop = '4px';
+                
+                candidates.slice(5, 10).forEach(function(ch) {{
+                    var btn = document.createElement('button');
+                    btn.className = 'candidate-item';
+                    btn.textContent = ch;
+                    btn.onclick = function() {{ selectCandidate(ch); }};
+                    rowDiv2.appendChild(btn);
+                }});
+                
+                container.appendChild(rowDiv2);
+            }}
         }}
         
         function selectCandidate(ch) {{
             var input = document.getElementById('searchInput');
             input.value += ch;
             clearPinyinState();
+            currentCandidatePage = 0;  // 重置页码
             
             if (input.value.length >= 2) {{
                 fetchInputTips(input.value);
@@ -1731,6 +1811,7 @@ class MapWidget(QWidget):
         
         function clearPinyinState() {{
             pinyinBuffer = '';
+            currentCandidatePage = 0;  // 重置页码
             document.getElementById('pinyinText').textContent = '';
             document.getElementById('candidatesContainer').innerHTML = '';
         }}
