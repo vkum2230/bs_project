@@ -183,8 +183,10 @@ class BikeComputerPro(QWidget):
         self.wifi_off_path = os.path.join(self.icons_path, "wifi_off.png")
 
         # ========== 高德地图配置 ==========
-        # 高德地图 WebService API Key
-        self.amap_key = "8b657a470f4b69e82bf81f72b3a2b3c0"
+        # 高德地图 API Key 配置
+        self.amap_key = "8b657a470f4b69e82bf81f72b3a2b3c0"  # Web服务 API Key
+        self.amap_jsapi_key = "c507e554a5bb6e08b7097fa61164f0e4"  # JS API Key
+        self.amap_security_key = "8ee0cb41f7666cfd320749d269ab6121"  # 安全密钥
         self.location_service = LocationService()
         # ==================================
 
@@ -195,17 +197,17 @@ class BikeComputerPro(QWidget):
         # 尝试多种语音方案
         voice_initialized = False
         
-        # 方案0: 最终版语音播放器（最稳定）
+        # 方案0: 混合语音播放器（在线Edge-TTS + 离线Piper）
         try:
-            from voice_driver.voice_final import FinalVoicePlayer
-            self.voice_player = FinalVoicePlayer(
+            from voice_driver.piper_voice import HybridVoicePlayer
+            self.voice_player = HybridVoicePlayer(
                 voice='xiaoxiao',
                 message_callback=self.add_voice_message  # 传入消息回调，播报时自动显示
             )
-            print("[Main] 语音播放器初始化成功")
+            print("[Main] 混合语音播放器初始化成功（支持离线）")
             voice_initialized = True
         except Exception as e0:
-            print(f"[Main] 语音播放器初始化失败: {e0}")
+            print(f"[Main] 混合语音播放器初始化失败: {e0}")
         
         # 方案1: ReSpeaker 专用播放器（备用）
         if not voice_initialized:
@@ -302,14 +304,11 @@ class BikeComputerPro(QWidget):
         # 初始化 Ollama 大模型客户端
         self.ollama_client = None
         try:
-            self.ollama_client = OllamaClient(model_name="my-llama")
-            if self.ollama_client.check_available():
-                print("[Main] Ollama 大模型连接成功")
-            else:
-                print("[Main] Ollama 服务未运行，大模型功能不可用")
-                self.ollama_client = None
+            self.ollama_client = self._init_ollama_client()
         except Exception as e:
             print(f"[Main] Ollama 客户端初始化失败: {e}")
+            import traceback
+            traceback.print_exc()
         
         # 按钮语音助手（按住说话功能）
         self.voice_assistant = None
@@ -496,11 +495,23 @@ class BikeComputerPro(QWidget):
         data_main_layout.addWidget(right_panel, 1)
 
         # 地图页面（使用高德在线地图组件）
-        self.page_map = MapWidget(amap_key=self.amap_key)
+        self.page_map = MapWidget(
+            amap_key=self.amap_key,
+            jsapi_key=self.amap_jsapi_key,
+            security_key=self.amap_security_key
+        )
+        self.page_map.map_loaded.connect(self.on_map_loaded)
         
+        # 连接导航信号
         # 连接导航信号
         self.page_map.nav_status_changed.connect(self.on_nav_status_changed)
         self.page_map.nav_instruction.connect(self.on_nav_instruction)
+        
+        # 连接新的导航处理器信号
+        nav_handler = self.page_map.get_navigation_handler()
+        nav_handler.nav_started.connect(self.on_nav_started)
+        nav_handler.nav_stopped.connect(self.on_nav_stopped)
+        nav_handler.nav_instruction.connect(self.on_nav_instruction_v2)
         
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.addWidget(self.page_data)
@@ -509,7 +520,7 @@ class BikeComputerPro(QWidget):
         # --- 消息框 ---
         self.dialog_container = QWidget()
         self.dialog_container.setMinimumHeight(110)
-        self.dialog_container.setMaximumHeight(180)  # 允许更高
+        self.dialog_container.setMaximumHeight(250)  # 增加最大高度以显示更多内容
         self.dialog_container.setStyleSheet("background: transparent;")
         
         dialog_layout = QVBoxLayout(self.dialog_container)
@@ -518,7 +529,7 @@ class BikeComputerPro(QWidget):
 
         self.dialog_box = QFrame()
         self.dialog_box.setMinimumHeight(95)
-        self.dialog_box.setMaximumHeight(150)  # 允许更高以显示多行
+        self.dialog_box.setMaximumHeight(220)  # 增加最大高度以显示多行
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -534,13 +545,15 @@ class BikeComputerPro(QWidget):
         self.dialog_msg.setFont(QFont("Helvetica", 13))
         self.dialog_msg.setStyleSheet("color: #CCCCCC; background: transparent;")
         self.dialog_msg.setWordWrap(True)  # 启用自动换行
-        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # 左对齐
+        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)  # 左对齐，顶部对齐
         self.dialog_msg.setTextFormat(Qt.PlainText)  # 纯文本模式，保留换行符
+        # 设置尺寸策略，允许垂直扩展
+        self.dialog_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         box_layout.addWidget(self.dialog_msg)
         
-        # 语音消息历史（最多显示最近3条，避免超出界面）
+        # 语音消息历史（最多显示最近2条，避免超出界面）
         self.voice_messages = []
-        self.max_voice_messages = 3
+        self.max_voice_messages = 2
         
         dialog_layout.addWidget(self.dialog_box)
 
@@ -568,10 +581,158 @@ class BikeComputerPro(QWidget):
         self.update_info()
 
         # ========== 启动语音播报 ==========
-        # 延迟 1.5 秒后播报欢迎语，确保系统已就绪
+        # 延迟 3 秒后播报欢迎语（给语音播放器初始化时间）
         self.voice_timer = QTimer(self)
-        self.voice_timer.singleShot(1500, self._play_welcome_voice)
+        self.voice_timer.singleShot(3000, self._play_welcome_voice)
         # ================================== 
+
+    def _init_ollama_client(self):
+        """
+        初始化 Ollama 大模型客户端
+        自动检测可用模型并创建连接，如未运行则自动启动服务
+        """
+        import requests
+        import subprocess
+        import time
+        
+        host = "http://localhost:11434"
+        print("[Ollama] 正在检查 Ollama 服务...")
+        
+        # 1. 检查服务是否运行
+        service_running = False
+        try:
+            response = requests.get(f"{host}/api/tags", timeout=2)
+            if response.status_code == 200:
+                service_running = True
+                print("[Ollama] 服务已在运行")
+        except:
+            service_running = False
+        
+        # 2. 如果服务未运行，尝试自动启动
+        if not service_running:
+            print("[Ollama] 服务未运行，尝试自动启动...")
+            try:
+                # 在后台启动 ollama serve
+                # 使用 nohup 确保进程不会在终端关闭时退出
+                subprocess.Popen(
+                    ["nohup", "ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True  # 创建新会话，避免被父进程终止
+                )
+                
+                # 等待服务启动（最多等待 15 秒）
+                print("[Ollama] 等待服务启动...")
+                for i in range(15):
+                    time.sleep(1)
+                    try:
+                        response = requests.get(f"{host}/api/tags", timeout=2)
+                        if response.status_code == 200:
+                            service_running = True
+                            print(f"[Ollama] 服务启动成功！（耗时 {i+1} 秒）")
+                            break
+                    except:
+                        continue
+                
+                if not service_running:
+                    print("[Ollama] 服务启动超时，可能启动失败")
+                    print("[Ollama] 请手动执行: ollama serve")
+                    return None
+                
+                # 服务启动后，等待模型完全加载（给 Ollama 预热时间）
+                print("[Ollama] 等待模型预热...")
+                time.sleep(3)
+                    
+            except Exception as e:
+                print(f"[Ollama] 自动启动失败: {e}")
+                print("[Ollama] 请手动执行: ollama serve")
+                return None
+        
+        # 2. 获取可用模型列表
+        try:
+            data = response.json()
+            models = data.get('models', [])
+            
+            if not models:
+                print("[Ollama] 没有可用的模型，请先拉取模型:")
+                print("  ollama pull llama3.2")
+                print("  ollama pull qwen:1.8b")
+                return None
+            
+            print(f"[Ollama] 发现 {len(models)} 个可用模型:")
+            for m in models:
+                model_name = m.get('name', m.get('model', 'unknown'))
+                print(f"  - {model_name}")
+            
+            # 3. 选择最佳模型（优先级排序）
+            preferred_models = [
+                "my-llama",           # 自定义模型（最高优先级）
+                "llama3.2",           # Llama 3.2
+                "llama3.2:3b",        # Llama 3.2 3B
+                "llama3.1",           # Llama 3.1
+                "llama3",             # Llama 3
+                "qwen2.5:3b",         # 通义千问 3B
+                "qwen2.5:1.5b",       # 通义千问 1.5B
+                "qwen:1.8b",          # 通义千问 1.8B
+                "qwen2:0.5b",         # 通义千问 0.5B
+                "gemma2:2b",          # Gemma 2 2B
+                "phi3",               # Phi-3
+                "phi3:mini",          # Phi-3 Mini
+                "tinyllama",          # TinyLlama
+            ]
+            
+            selected_model = None
+            available_model_names = [m.get('name', m.get('model', '')) for m in models]
+            
+            # 先尝试优先模型
+            for preferred in preferred_models:
+                if preferred in available_model_names:
+                    selected_model = preferred
+                    break
+            
+            # 如果没匹配到，使用第一个可用模型
+            if not selected_model:
+                selected_model = available_model_names[0]
+            
+            print(f"[Ollama] 选择模型: {selected_model}")
+            
+            # 4. 创建客户端
+            client = OllamaClient(model_name=selected_model, host=host)
+            
+            # 简单测试（带重试）
+            print("[Ollama] 测试模型连接...")
+            test_success = False
+            for attempt in range(2):  # 尝试2次
+                try:
+                    # 使用超短的测试，只检查模型是否响应
+                    test_response = client.chat("1+1=", max_tokens=5)
+                    if test_response and "抱歉" not in test_response:
+                        print(f"[Ollama] 大模型连接成功！使用模型: {selected_model}")
+                        test_success = True
+                        break
+                    else:
+                        print(f"[Ollama] 测试返回异常: {test_response}")
+                        if attempt == 0:
+                            print("[Ollama] 重试中...")
+                            time.sleep(2)
+                except Exception as e:
+                    print(f"[Ollama] 测试失败 (尝试 {attempt+1}/2): {e}")
+                    if attempt == 0:
+                        print("[Ollama] 重试中...")
+                        time.sleep(2)
+            
+            if test_success:
+                return client
+            else:
+                print("[Ollama] 模型测试失败，但服务可用，将继续尝试使用")
+                # 即使测试失败，也返回客户端，因为可能是模型加载慢
+                return client
+                
+        except Exception as e:
+            print(f"[Ollama] 获取模型列表失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def show_data_page(self):
         self.stacked_widget.setCurrentIndex(0)
@@ -610,6 +771,36 @@ class BikeComputerPro(QWidget):
     def on_data_received(self, data):
         formatted_data = json.dumps(data, indent=2, ensure_ascii=False)
         print(formatted_data)
+
+        # 更新数据上下文（供大模型使用）
+        try:
+            from data_context import get_data_context
+            data_ctx = get_data_context()
+            update_dict = {}
+            
+            if "speed" in data:
+                update_dict["speed"] = float(data["speed"])
+            if "power" in data:
+                update_dict["power"] = float(data["power"])
+            if "cadence" in data:
+                update_dict["cadence"] = float(data["cadence"])
+            if "distance" in data:
+                update_dict["distance"] = float(data["distance"])
+            if "ride_time" in data:
+                update_dict["ride_time"] = int(data["ride_time"])
+            if "slope" in data:
+                update_dict["slope"] = float(data["slope"])
+            if "temperature" in data:
+                update_dict["temperature"] = float(data["temperature"])
+            if "heart_rate" in data:
+                update_dict["heart_rate"] = float(data["heart_rate"])
+            if "rear_dist" in data:
+                update_dict["rear_dist"] = float(data["rear_dist"])
+            
+            if update_dict:
+                data_ctx.update_data(**update_dict)
+        except Exception as e:
+            print(f"[DataContext] 更新失败: {e}")
 
         # 更新数据卡片
         if "speed" in data:
@@ -668,6 +859,7 @@ class BikeComputerPro(QWidget):
             lat = loc.get("lat")
             lon = loc.get("lon")
             if lat and lon:
+                print(f"[DEBUG] 收到位置数据: {lat}, {lon}")
                 self.handle_location_update(lon, lat)
 
     def handle_location_update(self, lon, lat):
@@ -677,24 +869,37 @@ class BikeComputerPro(QWidget):
         if not province:
             province = "未知区域"
 
-        # 2. 更新地图页面显示（实时更新位置标记）
+        # 2. 更新数据上下文中的位置
+        try:
+            from data_context import get_data_context
+            get_data_context().update_data(location=province)
+        except Exception as e:
+            print(f"[DataContext] 更新位置失败: {e}")
+
+        # 3. 更新地图页面显示（实时更新位置标记）
         self.page_map.update_location(lat, lon, province)
 
-        # 3. 更新对话框显示（如果没有语音消息历史）
-        if not self.voice_messages:
-            self.dialog_msg.setText(f"📍 {province} · {lat:.4f}°N {lon:.4f}°E")
-
         # 4. 记录当前省份
+        import traceback
+        stack = traceback.extract_stack()
+        caller = stack[-2]
+        print(f"[DEBUG] 省份检查: 当前={self.current_province}, 新={province}, 是否变化={province != self.current_province} [来自: {caller.name}]")
         if province != self.current_province:
             self.current_province = province
-            print(f"进入新区域: {province}")
-            # 进入新区域时语音播报
-            self.add_voice_message(f"进入{province}", icon="📍")
+            print(f"[DEBUG] 进入新区域: {province}")
+            
+            # 添加带声音标识的消息到UI（🔊表示有语音播报，📍表示位置更新）
+            self.add_voice_message(f"进入{province}", icon="🔊📍")
+            
+            # 语音播报（不显示在UI）
             if self.voice_player:
                 try:
-                    self.voice_player.speak(f"进入{province}")
+                    self.voice_player.speak(f"进入{province}", show_in_ui=False)
                 except:
                     pass
+        # 5. 更新对话框显示位置（仅在未播报省份变化时显示位置信息）
+        elif not self.voice_messages:
+            self.dialog_msg.setText(f"📍 {province} · {lat:.4f}°N {lon:.4f}°E")
 
 
     def check_wifi(self):
@@ -729,8 +934,63 @@ class BikeComputerPro(QWidget):
         #     self.add_voice_message(status, icon="🧭")
         #     self.voice_player.speak(status)
 
+    def on_nav_started(self):
+        """导航开始回调"""
+        print("[Main] 导航开始")
+        self.add_voice_message("开始导航", icon="🧭")
+        if self.voice_player:
+            try:
+                self.voice_player.speak("开始导航")
+            except Exception as e:
+                print(f"[Voice] 导航开始播报失败: {e}")
+    
+    def on_nav_stopped(self):
+        """导航结束回调"""
+        print("[Main] 导航结束")
+        self.add_voice_message("导航结束", icon="🧭")
+        if self.voice_player:
+            try:
+                self.voice_player.speak("导航结束")
+            except Exception as e:
+                print(f"[Voice] 导航结束播报失败: {e}")
+    
+    def on_nav_instruction_v2(self, instruction: str, detail: str):
+        """导航指令回调 V2（带详细信息）"""
+        print(f"[Main] 导航指令: {instruction} | {detail}")
+        
+        # 添加到语音消息框
+        self.add_voice_message(instruction, icon="🧭")
+        
+        # 语音播报导航指令（简化版，去除HTML标签和距离数字）
+        if self.voice_player:
+            try:
+                # 简化指令用于语音播报
+                speak_text = self._simplify_nav_instruction(instruction)
+                self.voice_player.speak(speak_text)
+            except Exception as e:
+                print(f"[Voice] 导航语音播报失败: {e}")
+    
+    def on_map_loaded(self, success: bool):
+        """地图加载完成回调"""
+        if success:
+            print("[Main] ✅ 地图页面加载成功！")
+            self.add_voice_message("地图加载成功", icon="🗺️")
+        else:
+            print("[Main] ❌ 地图页面加载失败！")
+            self.add_voice_message("地图加载失败，请检查网络或API配置", icon="⚠️")
+    
+    def _simplify_nav_instruction(self, instruction: str) -> str:
+        """简化导航指令用于语音播报"""
+        import re
+        # 去除HTML标签
+        text = re.sub(r'<[^>]+>', '', instruction)
+        # 简化距离描述
+        text = text.replace("米", "米")
+        text = text.replace("公里", "公里")
+        return text
+    
     def on_nav_instruction(self, instruction):
-        """导航指令回调（用于语音播报）"""
+        """导航指令回调（旧版，用于兼容）"""
         print(f"导航指令: {instruction}")
         
         # 添加到语音消息框
@@ -749,13 +1009,52 @@ class BikeComputerPro(QWidget):
         
         Args:
             text: 消息内容
-            icon: 消息图标
+            icon: 消息图标，特殊值：
+                - __STREAM_UPDATE__: 流式更新（同一行覆盖）
+                - __STREAM_FINAL__: 流式完成（同一行显示最终结果）
         """
-        # 清理文本：将多行合并为一行，避免格式混乱
+        # 限制单条消息长度，防止超出界面
+        max_length = 120
         cleaned_text = text.replace('\n', ' ').replace('\r', ' ').strip()
+        if len(cleaned_text) > max_length:
+            cleaned_text = cleaned_text[:max_length] + "..."
         
-        # 使用 > 符号作为前缀，不显示时间戳
-        message = f"> {cleaned_text}"
+        # 处理流式更新标记：同一行覆盖更新
+        if icon == "__STREAM_UPDATE__":
+            # 检查最后一条是否是流式消息（以 > 🤖 开头）
+            if self.voice_messages and "> 🤖 " in self.voice_messages[-1]:
+                # 替换最后一条，保持格式一致
+                self.voice_messages[-1] = f"> 🤖 {cleaned_text}"
+            else:
+                # 还没有流式消息，添加一条（不带>前缀，由后续更新添加）
+                self.voice_messages.append(f"> 🤖 {cleaned_text}")
+            
+            # 更新显示
+            display_text = "\n".join(self.voice_messages)
+            self.dialog_msg.setText(display_text)
+            return
+        
+        # 处理流式完成标记：在同一行显示最终结果
+        if icon == "__STREAM_FINAL__":
+            # 查找并替换最后一条流式消息
+            if self.voice_messages and "> 🤖 " in self.voice_messages[-1]:
+                self.voice_messages[-1] = f"> 🤖 {cleaned_text}"
+            else:
+                # 没有流式消息，添加最终结果
+                self.voice_messages.append(f"> 🤖 {cleaned_text}")
+            
+            # 限制历史长度
+            if len(self.voice_messages) > self.max_voice_messages:
+                self.voice_messages.pop(0)
+            
+            # 更新显示
+            display_text = "\n".join(self.voice_messages)
+            self.dialog_msg.setText(display_text)
+            print(f"[VoiceMessage] > 🤖 {cleaned_text}")
+            return
+        
+        # 普通消息处理
+        message = f"> {icon} {cleaned_text}"
         
         # 添加到历史
         self.voice_messages.append(message)
@@ -764,31 +1063,52 @@ class BikeComputerPro(QWidget):
         if len(self.voice_messages) > self.max_voice_messages:
             self.voice_messages.pop(0)
         
-        # 更新显示（多条消息换行显示）
+        # 更新显示
         display_text = "\n".join(self.voice_messages)
         self.dialog_msg.setText(display_text)
         
-        print(f"[VoiceMessage] {message}")
+        # 打印调用栈来追踪来源
+        import traceback
+        stack = traceback.extract_stack()
+        caller = stack[-2]  # 获取调用者信息
+        print(f"[VoiceMessage] {message} [来自: {caller.filename}:{caller.lineno} {caller.name}]")
 
     def _play_welcome_voice(self):
-        """播放欢迎语音"""
-        print("[Voice] 播放欢迎语音...")
+        """播放欢迎语音（自动选择在线/离线）"""
+        print("[Voice] ========== 播放欢迎语音 ==========")
         
-        # 语音播报（会自动通过 message_callback 显示到消息框）
-        if self.voice_player:
-            try:
-                result = self.voice_player.speak("你好，我是骑行小智", block=False)
-                print(f"[Voice] 欢迎语音播报{'成功' if result else '失败'}")
-            except Exception as e:
-                print(f"[Voice] 欢迎语音播报失败: {e}")
+        if not self.voice_player:
+            print("[Voice] 错误: 语音播放器未初始化")
+            return
+        
+        # 检查语音播放器类型
+        player_type = type(self.voice_player).__name__
+        print(f"[Voice] 使用播放器: {player_type}")
+        
+        try:
+            # 混合播放器自动选择：网络好->Edge-TTS，无网络->Piper离线
+            print("[Voice] 开始播报: '你好，我是骑行小智'...")
+            result = self.voice_player.speak("你好，我是骑行小智", block=False)
+            print(f"[Voice] 播报调用返回: {'成功' if result else '失败'}")
+            
+            if not result:
+                print("[Voice] 警告: 播报调用返回失败")
+                
+        except Exception as e:
+            print(f"[Voice] 播报异常: {e}")
+            import traceback
+            traceback.print_exc()
         
         # 停止呼吸灯，改为常亮
         if self.led_controller:
             try:
                 self.led_controller.stop_pattern()
                 self.led_controller.set_all(LEDController.COLOR_GREEN)
+                print("[Voice] LED 设置为常亮绿色")
             except Exception as e:
                 print(f"[LED] 设置绿色失败: {e}")
+        
+        print("[Voice] ========== 欢迎语音处理完成 ==========")
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape: 

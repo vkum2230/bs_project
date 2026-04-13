@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import subprocess
+import queue
 from typing import Callable, Optional, Tuple
 from dataclasses import dataclass
 
@@ -121,6 +122,7 @@ class VoiceRecorder:
     
     def _record_loop(self):
         """录音循环"""
+        stream = None
         try:
             import pyaudio
             
@@ -143,14 +145,19 @@ class VoiceRecorder:
                     print(f"[VoiceRecorder] 读取音频错误: {e}")
                     break
             
-            stream.stop_stream()
-            stream.close()
-            
             print("[VoiceRecorder] 录音循环结束")
             
         except Exception as e:
             print(f"[VoiceRecorder] 录音异常: {e}")
             self._recording = False
+        finally:
+            # 确保流被正确关闭
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception as e:
+                    print(f"[VoiceRecorder] 关闭音频流错误: {e}")
     
     def _save_wav(self) -> str:
         """保存为 WAV 文件"""
@@ -194,6 +201,7 @@ class VoiceRecognizer:
         self.model_path = model_path
         self._model = None
         self._recognizer = None
+        self._lock = threading.Lock()  # 保护识别器的锁
         
         # 尝试初始化 Vosk
         self._init_vosk()
@@ -257,39 +265,40 @@ class VoiceRecognizer:
     
     def _recognize_vosk(self, wav_path: str) -> RecognitionResult:
         """使用 Vosk 识别"""
-        try:
-            import wave
-            import json
-            
-            # 重置识别器
-            from vosk import KaldiRecognizer
-            self._recognizer = KaldiRecognizer(self._model, 16000)
-            
-            with wave.open(wav_path, 'rb') as wf:
-                # 检查格式
-                if wf.getnchannels() != 1 or wf.getframerate() != 16000:
-                    # 需要转换
-                    print("[VoiceRecognizer] 转换音频格式...")
-                    wav_path = self._convert_audio(wav_path)
-                    wf.close()
-                    wf = wave.open(wav_path, 'rb')
+        with self._lock:
+            try:
+                import wave
+                import json
+                
+                # 先检查并转换音频格式
+                actual_wav_path = wav_path
+                with wave.open(wav_path, 'rb') as wf_check:
+                    if wf_check.getnchannels() != 1 or wf_check.getframerate() != 16000:
+                        # 需要转换
+                        print("[VoiceRecognizer] 转换音频格式...")
+                        actual_wav_path = self._convert_audio(wav_path)
+                
+                # 创建新的识别器实例（避免多线程冲突）
+                from vosk import KaldiRecognizer
+                recognizer = KaldiRecognizer(self._model, 16000)
                 
                 # 识别
                 results = []
-                while True:
-                    data = wf.readframes(4000)
-                    if len(data) == 0:
-                        break
+                with wave.open(actual_wav_path, 'rb') as wf:
+                    while True:
+                        data = wf.readframes(4000)
+                        if len(data) == 0:
+                            break
+                        
+                        if recognizer.AcceptWaveform(data):
+                            result = json.loads(recognizer.Result())
+                            if result.get('text'):
+                                results.append(result['text'])
                     
-                    if self._recognizer.AcceptWaveform(data):
-                        result = json.loads(self._recognizer.Result())
-                        if result.get('text'):
-                            results.append(result['text'])
-                
-                # 获取最终结果
-                final_result = json.loads(self._recognizer.FinalResult())
-                if final_result.get('text'):
-                    results.append(final_result['text'])
+                    # 获取最终结果
+                    final_result = json.loads(recognizer.FinalResult())
+                    if final_result.get('text'):
+                        results.append(final_result['text'])
                 
                 text = ' '.join(results) if results else final_result.get('text', '')
                 
@@ -298,9 +307,11 @@ class VoiceRecognizer:
                 else:
                     return RecognitionResult("[未识别到语音]", 0.0)
                     
-        except Exception as e:
-            print(f"[VoiceRecognizer] Vosk 识别失败: {e}")
-            return RecognitionResult(f"[识别错误: {str(e)}]", 0.0)
+            except Exception as e:
+                print(f"[VoiceRecognizer] Vosk 识别失败: {e}")
+                import traceback
+                traceback.print_exc()
+                return RecognitionResult(f"[识别错误: {str(e)}]", 0.0)
     
     def _convert_audio(self, wav_path: str) -> str:
         """转换音频为单声道 16kHz"""
@@ -375,9 +386,92 @@ class ButtonVoiceAssistant:
         self.button_handler = None
         
         self._recording_indicator = False
+        self._lock = threading.Lock()  # 保护状态变量的锁
         self._current_response = ""  # 用于流式输出累积回复
+        self._stream_buffer = ""  # 流式缓冲区
+        self._speak_started = False  # 是否已开始播报
+        self._last_update_time = 0  # 上次UI更新时间
+        self._stream_displayed = False  # 是否已显示流式结果
+        self._processing = False  # 是否正在处理中，防止重复触发
+        
+        # 流式语音播报状态 - 可靠的存储机制
+        self._cleaned_response = ""  # 已清理的完整响应文本
+        self._played_len = 0         # 已播放的字符数
+        self._last_speak_time = 0    # 上次播报时间
+        
+        # 语音队列 - 确保按顺序播放不重叠
+        self._speak_queue = queue.Queue()
+        self._speak_thread = None
+        self._speak_thread_running = False
         
         self._init_button()
+        self._start_speak_thread()
+    
+    def _start_speak_thread(self):
+        """启动语音播放线程"""
+        self._speak_thread_running = True
+        self._speak_thread = threading.Thread(target=self._speak_worker, daemon=True)
+        self._speak_thread.start()
+        print("[ButtonVoiceAssistant] 语音队列线程已启动")
+    
+    def _speak_worker(self):
+        """语音播放工作线程 - 预加载机制确保连贯"""
+        preloaded_text = None
+        
+        while self._speak_thread_running:
+            try:
+                # 如果有预加载的文本，先播放它
+                if preloaded_text:
+                    text = preloaded_text
+                    preloaded_text = None
+                    is_preloaded = True
+                else:
+                    # 从队列获取
+                    text = self._speak_queue.get(timeout=0.15)
+                    is_preloaded = False
+                
+                if text and self.voice_player:
+                    # 尝试预加载下一句
+                    try:
+                        preloaded_text = self._speak_queue.get_nowait()
+                    except queue.Empty:
+                        preloaded_text = None
+                    
+                    # 播放当前句子
+                    self.voice_player.speak(text, block=True, show_in_ui=False)
+                    
+                    # 标记当前任务完成（如果是从队列取的）
+                    if not is_preloaded:
+                        self._speak_queue.task_done()
+                    
+                    # 如果预加载了，循环继续播放下一句
+                    if preloaded_text:
+                        continue
+                elif not is_preloaded:
+                    self._speak_queue.task_done()
+                    
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[ButtonVoiceAssistant] 语音播放错误: {e}")
+    
+    def _queue_speak(self, text: str):
+        """将语音加入播放队列"""
+        if text and text.strip():
+            self._speak_queue.put(text.strip())
+            print(f"[ButtonVoiceAssistant] 加入队列: {text[:40]}...")
+    
+    def _stop_speak_thread(self):
+        """停止语音播放线程"""
+        self._speak_thread_running = False
+        # 清空队列
+        while not self._speak_queue.empty():
+            try:
+                self._speak_queue.get_nowait()
+            except queue.Empty:
+                break
+        if self._speak_thread:
+            self._speak_thread.join(timeout=2.0)
     
     def _init_button(self):
         """初始化按钮"""
@@ -400,9 +494,10 @@ class ButtonVoiceAssistant:
     
     def _on_button_press(self):
         """按钮按下 - 开始录音"""
-        # 防止重复触发（如果已经在录音中则忽略）
-        if self._recording_indicator:
-            return
+        with self._lock:
+            # 防止重复触发（如果已经在录音中或处理中则忽略）
+            if self._recording_indicator or self._processing:
+                return
         
         print("[ButtonVoiceAssistant] 按钮按下 - 开始录音")
         
@@ -418,7 +513,8 @@ class ButtonVoiceAssistant:
         success = self.recorder.start_recording()
         
         if success:
-            self._recording_indicator = True
+            with self._lock:
+                self._recording_indicator = True
         else:
             # 录音失败，LED 恢复
             if self.led_controller:
@@ -433,12 +529,14 @@ class ButtonVoiceAssistant:
         """按钮释放 - 停止录音并处理"""
         print("[ButtonVoiceAssistant] 按钮释放 - 停止录音")
         
-        if not self.recorder.is_recording():
-            return
+        with self._lock:
+            if not self._recording_indicator:
+                return
+            self._recording_indicator = False
+            self._processing = True
         
         # 停止录音
         wav_path = self.recorder.stop_recording()
-        self._recording_indicator = False
         
         # LED 变绿色（处理中）
         if self.led_controller:
@@ -451,6 +549,8 @@ class ButtonVoiceAssistant:
         if not wav_path:
             if self.message_callback:
                 self.message_callback("❌ 录音失败", icon="⚠️")
+            with self._lock:
+                self._processing = False
             return
         
         # 启动识别线程
@@ -471,32 +571,109 @@ class ButtonVoiceAssistant:
                 
                 print(f"[ButtonVoiceAssistant] 识别结果: {clean_text} (置信度: {result.confidence:.2f})")
                 
-                # 3. 调用 Ollama 大模型处理（流式输出，边生成边显示）
-                if hasattr(self, 'ollama_client') and self.ollama_client and result.confidence > 0.3:
-                    print(f"[ButtonVoiceAssistant] 开始调用大模型: {clean_text}")
-                    
+                # 3. 处理用户请求
+                if self.ollama_client and result.confidence > 0.3:
                     # 先显示用户说的话
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
                     
+                    # 获取实时数据
+                    try:
+                        import sys
+                        sys.path.insert(0, '/home/hedya/Desktop/bs_project/qt_project')
+                        from data_context import get_data_context
+                        d = get_data_context().get_data()
+                        
+                        # 只检测明确的数据查询关键词
+                        data_keywords = ['速度', '功率', '踏频', '心率', '温度', '坡度', '距离', '时间', '里程', '数据']
+                        is_data_query = any(kw in clean_text for kw in data_keywords)
+                        
+                        if is_data_query and d.speed > 0:
+                            # 根据用户问题智能选择要回答的数据
+                            print(f"[ButtonVoiceAssistant] 识别文本: '{clean_text}'")
+                            parts = []
+                            
+                            # 检测用户具体问什么
+                            if '速度' in clean_text:
+                                parts.append(f"速度{d.speed:.1f}公里每小时")
+                            if '功率' in clean_text:
+                                parts.append(f"功率{d.power:.0f}瓦")
+                            if '踏频' in clean_text:
+                                parts.append(f"踏频{d.cadence:.0f}转每分钟")
+                            if '心率' in clean_text:
+                                parts.append(f"心率{d.heart_rate:.0f}次每分钟")
+                            if '温度' in clean_text or '气温' in clean_text:
+                                parts.append(f"环境温度{d.temperature:.1f}摄氏度")
+                            if '距离' in clean_text or '里程' in clean_text:
+                                parts.append(f"已骑行{d.distance:.1f}公里")
+                            if '时间' in clean_text:
+                                hours = d.ride_time // 3600
+                                mins = (d.ride_time % 3600) // 60
+                                parts.append(f"骑行时间{hours}小时{mins}分钟")
+                            if '坡度' in clean_text:
+                                prefix = "上坡" if d.slope > 0 else "下坡"
+                                parts.append(f"{prefix}{abs(d.slope):.1f}%坡度")
+                            
+                            # 问"数据"时播报所有，否则只回答匹配的具体数据
+                            if '数据' in clean_text:
+                                parts = [f"速度{d.speed:.1f}公里每小时"]
+                                if d.power > 0: parts.append(f"功率{d.power:.0f}瓦")
+                                if d.cadence > 0: parts.append(f"踏频{d.cadence:.0f}")
+                                if d.distance > 0: parts.append(f"骑行{d.distance:.1f}公里")
+                                if d.heart_rate > 0: parts.append(f"心率{d.heart_rate:.0f}")
+                                if d.temperature > 0: parts.append(f"温度{d.temperature:.1f}度")
+                            
+                            # 调试：查看匹配了哪些数据
+                            print(f"[ButtonVoiceAssistant] 匹配到的数据项: {parts}")
+                            
+                            reply = "，".join(parts) + "。"
+                            
+                            print(f"[ButtonVoiceAssistant] 本地直接回复: {reply}")
+                            
+                            # 显示回复（带语音标识）
+                            if self.message_callback:
+                                self.message_callback(reply, icon="🔊")
+                            
+                            # 语音播报（加入队列顺序播放）
+                            self._queue_speak(reply)
+                            
+                            # LED恢复
+                            if self.led_controller:
+                                try:
+                                    self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
+                                except:
+                                    pass
+                            return  # 跳过大模型调用
+                    except Exception as e:
+                        print(f"[ButtonVoiceAssistant] 本地处理失败: {e}")
+                    
+                    # 非数据查询问题，走大模型（不传递骑行数据）
+                    print(f"[ButtonVoiceAssistant] 调用大模型: {clean_text}")
+                    
+                    system_prompt = "你是骑行助手小智。简洁回答，无Markdown。"
+                    enhanced_prompt = clean_text
+                    
                     # 使用流式输出，边生成边显示和播报
-                    self._current_response = ""  # 累积完整回复
+                    # 注意：流式输出是异步的，_on_stream_complete 会重置 _processing 状态
+                    self._reset_stream_state()  # 重置所有流式状态
                     self.ollama_client.chat_stream(
-                        prompt=clean_text,
+                        prompt=enhanced_prompt,
                         on_token=lambda token: self._on_stream_token(token),
                         on_complete=lambda full: self._on_stream_complete(full),
-                        system_prompt="你是骑行助手。用户问骑行相关问题，你给出简短建议。不相关的问题简单回答。控制在30字以内。",
-                        max_tokens=60  # 进一步限制，约30个汉字
+                        system_prompt=system_prompt,
+                        max_tokens=512  # 允许生成更长的回复
                     )
+                    # 流式输出已启动，_processing 状态将在 _on_stream_complete 中重置
+                    return  # 提前返回，不执行后面的清理
                 else:
                     print(f"[ButtonVoiceAssistant] 没有Ollama客户端或置信度太低，直接播报")
                     # 没有 Ollama 时，直接显示识别结果
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
                     
-                    # 直接播报识别结果
-                    if self.voice_player and result.confidence > 0.3:
-                        self.voice_player.speak(clean_text[:50], block=False, show_in_ui=False)
+                    # 直接播报识别结果（加入队列）
+                    if result.confidence > 0.3:
+                        self._queue_speak(clean_text[:50])
                     
                     # LED 恢复
                     if self.led_controller:
@@ -516,23 +693,95 @@ class ButtonVoiceAssistant:
                 
         except Exception as e:
             print(f"[ButtonVoiceAssistant] 处理录音失败: {e}")
+            import traceback
+            traceback.print_exc()
             if self.message_callback:
                 self.message_callback(f"❌ 处理失败: {str(e)}", icon="⚠️")
+        finally:
+            # 确保处理状态被重置（流式输出路径除外）
+            with self._lock:
+                self._processing = False
     
     def _on_stream_token(self, token: str):
-        """流式输出 - 收到每个token时调用"""
+        """流式输出 - 收到每个token时调用，实时更新UI和语音播报"""
+        import time
         self._current_response += token
-        # 实时更新显示（可选，避免闪烁可以只更新最后一条）
-        # 这里我们只累积，不实时更新UI，避免闪烁
+        current_time = time.time()
         
+        # 每100ms更新一次UI，在同一行覆盖
+        if current_time - self._last_update_time > 0.1:
+            if self.message_callback:
+                # 显示部分结果，使用特殊标记实现覆盖更新
+                partial = self._clean_response(self._current_response)
+                self.message_callback(partial, icon="__STREAM_UPDATE__")
+                self._stream_displayed = True
+            self._last_update_time = current_time
+        
+        # 流式语音播报：检测完整句子并分段播报
+        self._check_and_speak_streaming()
+    
+    def _check_and_speak_streaming(self):
+        """检查并播报新增内容 - 只在完整句子结束符处分段"""
+        import time
+        
+        current_time = time.time()
+        
+        # 重新清理当前响应（确保一致性）
+        new_cleaned = self._clean_response(self._current_response)
+        
+        # 如果新清理的文本比已存储的短，使用已存储的
+        if len(new_cleaned) < len(self._cleaned_response):
+            new_cleaned = self._cleaned_response
+        else:
+            # 更新存储的清理文本
+            self._cleaned_response = new_cleaned
+        
+        # 检查是否有新内容需要播报
+        if self._played_len >= len(self._cleaned_response):
+            return
+        
+        # 获取未播报的部分
+        new_part = self._cleaned_response[self._played_len:]
+        if not new_part:
+            return
+        
+        # 只在完整句子结束符（。！？）处分段
+        for i, char in enumerate(new_part):
+            if char in "。！？":
+                # 找到完整句子
+                segment = new_part[:i+1]
+                
+                # 加入队列播放
+                self._queue_speak(segment)
+                self._played_len += len(segment)
+                self._last_speak_time = current_time
+                self._speak_started = True
+                return  # 一次只处理一句，下次token继续
+    
+    def _clean_response(self, text: str) -> str:
+        """清理模型回复，去除Markdown格式符号"""
+        import re
+        # 去除星号、下划线等Markdown格式符号
+        text = re.sub(r'\*+', '', text)  # 去除 * 号
+        text = re.sub(r'_+', '', text)   # 去除 _ 下划线
+        text = re.sub(r'`+', '', text)   # 去除 ` 代码块
+        # 去除多余空格
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+    
     def _on_stream_complete(self, response: str):
-        """流式输出完成 - 显示并播报"""
+        """流式输出完成 - 显示最终结果并播报剩余内容"""
         try:
-            print(f"[ButtonVoiceAssistant] 大模型回复: {response}")
+            # 清理回复内容
+            full_response = self._clean_response(response)
+            print(f"[ButtonVoiceAssistant] 大模型完整回复: {full_response}")
+            
+            stream_was_displayed = self._stream_displayed
+            self._stream_displayed = False
             
             # 如果回复为空或超时提示，不显示
-            if not response or "抱歉" in response:
-                # LED 恢复呼吸灯状态
+            if not full_response or "抱歉" in full_response:
+                self._speak_started = False
                 if self.led_controller:
                     try:
                         self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
@@ -540,15 +789,25 @@ class ButtonVoiceAssistant:
                         pass
                 return
             
-            # 显示模型回复到消息框
+            # 显示模型回复到消息框（最终完整版，在同一行）
             if self.message_callback:
-                self.message_callback(response, icon="🤖")
+                if stream_was_displayed:
+                    # 流式过程中已显示过，使用最终标记覆盖同一行
+                    self.message_callback(full_response, icon="__STREAM_FINAL__")
+                else:
+                    # 流式过程中未显示（生成太快），直接显示新消息
+                    self.message_callback(full_response, icon="🤖")
             
-            # 语音播报模型回复
-            if self.voice_player:
-                # 限制长度，避免太长
-                speak_text = response[:80] if len(response) > 80 else response
-                self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+            # 更新清理后的文本
+            self._cleaned_response = full_response
+            
+            # 播报剩余未播报的内容（从已播放位置到结尾）
+            if self._played_len < len(full_response):
+                remaining = full_response[self._played_len:]
+                if remaining.strip():
+                    print(f"[ButtonVoiceAssistant] 完成时播报剩余: {remaining[:50]}...")
+                    self._queue_speak(remaining)
+                    self._played_len = len(full_response)
             
             # LED 恢复呼吸灯状态
             if self.led_controller:
@@ -559,20 +818,38 @@ class ButtonVoiceAssistant:
                 
         except Exception as e:
             print(f"[ButtonVoiceAssistant] 处理大模型回复失败: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # 重置所有流式状态
+            self._reset_stream_state()
+            # 重置处理状态，允许下次录音
+            with self._lock:
+                self._processing = False
+    
+    def _reset_stream_state(self):
+        """重置流式输出状态"""
+        self._current_response = ""      # 原始累积响应
+        self._stream_buffer = ""
+        self._speak_started = False
+        self._cleaned_response = ""      # 清理后的响应
+        self._played_len = 0             # 已播放长度
+        self._last_speak_time = 0
+        self._stream_displayed = False
     
     def _handle_ollama_response(self, response: str):
         """处理 Ollama 大模型返回的结果（非流式，备用）"""
         try:
+            # 清理回复内容
+            response = self._clean_response(response)
             print(f"[ButtonVoiceAssistant] 大模型回复: {response}")
             
             # 显示模型回复到消息框
             if self.message_callback:
                 self.message_callback(response, icon="🤖")
             
-            # 语音播报模型回复
-            if self.voice_player:
-                speak_text = response[:80] if len(response) > 80 else response
-                self.voice_player.speak(speak_text, block=False, show_in_ui=False)
+            # 语音播报模型回复（完整内容，加入队列）
+            self._queue_speak(response)
             
             # LED 恢复呼吸灯状态
             if self.led_controller:
@@ -590,6 +867,8 @@ class ButtonVoiceAssistant:
             self.button_handler.stop()
         if self.recorder.is_recording():
             self.recorder.stop_recording()
+        # 停止语音队列线程
+        self._stop_speak_thread()
 
 
 if __name__ == "__main__":

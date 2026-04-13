@@ -68,7 +68,11 @@ class FinalVoicePlayer:
                 # 优先尝试 Edge-TTS
                 if self._edge_tts:
                     try:
-                        result = asyncio.run(self._speak_edge(text))
+                        # 在新线程中使用新的事件循环
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        result = loop.run_until_complete(self._speak_edge(text))
+                        loop.close()
                         if result:
                             return True
                         print("[FinalVoice] Edge-TTS 失败，使用备用")
@@ -86,44 +90,77 @@ class FinalVoicePlayer:
             thread.start()
             return True
     
-    async def _speak_edge(self, text: str) -> bool:
-        """使用 Edge-TTS"""
+    async def _speak_edge(self, text: str, max_retries: int = 2) -> bool:
+        """使用 Edge-TTS（带重试）"""
         mp3_path = None
         
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                mp3_path = f.name
-            
-            # 生成语音
-            communicate = self._edge_tts.Communicate(
-                text=text,
-                voice=self.voice,
-                rate="+0%",  # 使用默认语速，避免问题
-                volume="+0%"
-            )
-            
-            await communicate.save(mp3_path)
-            
-            # 检查文件
-            size = os.path.getsize(mp3_path)
-            if size < 1000:
-                print(f"[FinalVoice] 生成的文件太小: {size} bytes")
-                return False
-            
-            print(f"[FinalVoice] 语音生成: {size} bytes")
-            
-            # 转换为 WAV 并播放
-            return self._play_with_aplay(mp3_path)
-            
-        except Exception as e:
-            print(f"[FinalVoice] Edge-TTS 失败: {e}")
+        # 先检查网络连接
+        if not self._check_network():
+            print("[FinalVoice] 网络不可用，跳过 Edge-TTS")
             return False
-        finally:
-            if mp3_path and os.path.exists(mp3_path):
-                try:
-                    os.remove(mp3_path)
-                except:
-                    pass
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"[FinalVoice] Edge-TTS 尝试 {attempt + 1}/{max_retries}...")
+                
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                    mp3_path = f.name
+                
+                # 生成语音 - 增加超时控制
+                communicate = self._edge_tts.Communicate(
+                    text=text,
+                    voice=self.voice,
+                    rate="+0%",
+                    volume="+0%"
+                )
+                
+                # 使用 asyncio.wait_for 添加超时
+                await asyncio.wait_for(communicate.save(mp3_path), timeout=5.0)
+                
+                # 检查文件
+                size = os.path.getsize(mp3_path)
+                if size < 1000:
+                    print(f"[FinalVoice] 生成的文件太小: {size} bytes")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.5)
+                        continue
+                    return False
+                
+                print(f"[FinalVoice] 语音生成成功: {size} bytes")
+                
+                # 转换为 WAV 并播放
+                return self._play_with_aplay(mp3_path)
+                
+            except asyncio.TimeoutError:
+                print(f"[FinalVoice] Edge-TTS 超时 (尝试 {attempt + 1})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+                else:
+                    return False
+            except Exception as e:
+                print(f"[FinalVoice] Edge-TTS 失败 (尝试 {attempt + 1}/{max_retries}): {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+                else:
+                    return False
+            finally:
+                if mp3_path and os.path.exists(mp3_path):
+                    try:
+                        os.remove(mp3_path)
+                    except:
+                        pass
+        
+        return False
+    
+    def _check_network(self) -> bool:
+        """检查网络连接"""
+        try:
+            import socket
+            socket.setdefaulttimeout(2)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+            return True
+        except:
+            return False
     
     def _play_with_aplay(self, mp3_path: str) -> bool:
         """使用 aplay 播放，指定 ReSpeaker 设备"""

@@ -8,6 +8,7 @@ Ollama 本地大模型客户端
 import requests
 import json
 import threading
+import time
 from typing import Callable, Optional
 
 
@@ -27,14 +28,14 @@ class OllamaClient:
         self.api_url = f"{host}/api/generate"
         
     def chat(self, prompt: str, system_prompt: str = None, 
-             max_tokens: int = 60) -> str:
+             max_tokens: int = 256) -> str:
         """
         发送对话请求（极速模式）
         
         Args:
             prompt: 用户输入
             system_prompt: 系统提示词
-            max_tokens: 最大生成token数（默认60，约30个汉字）
+            max_tokens: 最大生成token数（默认256，足够生成完整回复）
             
         Returns:
             模型回复文本
@@ -59,11 +60,11 @@ class OllamaClient:
             if system_prompt:
                 data["system"] = system_prompt
             
-            # 发送请求（树莓派需要较长时间）
+            # 发送请求
             response = requests.post(
                 self.api_url,
                 json=data,
-                timeout=30  # 30秒超时
+                timeout=30  # 30秒超时，树莓派需要更长时间
             )
             
             if response.status_code == 200:
@@ -85,7 +86,7 @@ class OllamaClient:
             return "抱歉，出错了。"
     
     def chat_async(self, prompt: str, callback: Callable[[str], None], 
-                   system_prompt: str = None, max_tokens: int = 100):
+                   system_prompt: str = None, max_tokens: int = 256):
         """
         异步发送对话请求（不阻塞）
         
@@ -107,7 +108,7 @@ class OllamaClient:
                     on_token: Callable[[str], None],
                     on_complete: Callable[[str], None],
                     system_prompt: str = None,
-                    max_tokens: int = 60):
+                    max_tokens: int = 256):
         """
         流式对话（边生成边返回，更快响应）
         
@@ -116,7 +117,7 @@ class OllamaClient:
             on_token: 收到每个token时的回调
             on_complete: 完成时的回调（接收完整文本）
             system_prompt: 系统提示词
-            max_tokens: 最大生成长度（默认60，约30个汉字）
+            max_tokens: 最大生成长度（默认256，足够生成完整回复）
         """
         def _do_stream():
             try:
@@ -128,11 +129,13 @@ class OllamaClient:
                     "stream": True,  # 流式输出
                     "options": {
                         "num_predict": max_tokens,
-                        "temperature": 0.3,
-                        "top_k": 20,
-                        "top_p": 0.8,
-                        "repeat_penalty": 1.2,
-                        "num_ctx": 1024,
+                        "temperature": 0.5,  # 稍高一点，生成更快
+                        "top_k": 40,
+                        "top_p": 0.9,
+                        "repeat_penalty": 1.1,
+                        "num_ctx": 512,  # 进一步减小上下文
+                        "num_batch": 256,  # 批处理大小
+                        "num_thread": 4,  # 使用多线程
                     }
                 }
                 
@@ -148,9 +151,12 @@ class OllamaClient:
                     self.api_url,
                     json=data,
                     stream=True,
-                    timeout=30  # 30秒超时，树莓派需要更长时间
+                    timeout=60  # 60秒超时，长文本需要更多时间
                 )
                 print(f"[OllamaClient] 收到响应，状态码: {response.status_code}")
+                
+                # 实时显示模式：立即开始回调
+                last_update_time = time.time()
                 
                 for line in response.iter_lines():
                     if line:
@@ -162,18 +168,20 @@ class OllamaClient:
                             if token:
                                 full_response += token
                                 token_count += 1
+                                # 立即回调每个token，实现快速显示
                                 on_token(token)
-                                
-                                # 每10个token打印一次
-                                if token_count % 10 == 0:
-                                    print(f"[OllamaClient] 已生成 {token_count} 个token")
                             
-                            if json_line.get("done", False):
+                            # 检查是否完成（done字段或done_reason字段）
+                            if json_line.get("done", False) or json_line.get("done_reason"):
                                 print(f"[OllamaClient] 生成完成，共 {token_count} 个token")
+                                if json_line.get("done_reason"):
+                                    print(f"[OllamaClient] 完成原因: {json_line.get('done_reason')}")
                                 break
                         except Exception as parse_err:
-                            print(f"[OllamaClient] 解析行错误: {parse_err}, 行内容: {line[:100]}")
-                            pass
+                            # 记录解析错误但不中断流式输出
+                            print(f"[OllamaClient] 解析行失败: {parse_err}, 行内容: {line[:100]}")
+                
+                print(f"[OllamaClient] 总token数: {token_count}")
                 
                 if not full_response.strip():
                     print("[OllamaClient] 警告: 回复为空")
@@ -184,8 +192,13 @@ class OllamaClient:
                 on_complete(full_response.strip())
                 
             except requests.exceptions.Timeout:
-                print("[OllamaClient] 流式请求超时（30秒）")
-                on_complete("抱歉，我想得太久了，请再说一次。")
+                print("[OllamaClient] 流式请求超时（60秒）")
+                print(f"[OllamaClient] 已生成内容长度: {len(full_response)} 字符")
+                # 超时但已经有内容，返回已生成的内容
+                if full_response.strip():
+                    on_complete(full_response.strip())
+                else:
+                    on_complete("抱歉，我想得太久了，请再说一次。")
             except Exception as e:
                 print(f"[OllamaClient] 流式请求错误: {e}")
                 on_complete("抱歉，出错了。")
