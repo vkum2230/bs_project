@@ -28,25 +28,31 @@
 | # | 功能 | 文件/模块 | 状态 |
 |---|------|----------|------|
 | 1 | PyQt5 主界面（仪表盘 + 数据卡片 + 消息框） | `main.py`, `ui_main_window.py` | 完成 |
-| 2 | 自定义圆形仪表盘控件 | `main.py` 内 `CircleGauge` | 完成 |
-| 3 | STM32 串口数据采集（JSON 协议） | `main.py` 内 `SerialReader` | 完成 |
-| 4 | 高德在线地图（JS API）+ 实时位置标记 | `map_widget.py` | 完成 |
-| 5 | 离线省份判断 + 语音播报 | `location_service.py` | 完成 |
-| 6 | Piper 本地 TTS + Edge-TTS 在线回退 | `voice_driver/piper_voice.py` | 完成 |
-| 7 | 按钮语音交互（GPIO 17）+ LED 状态指示 | `voice_driver/voice_recorder.py` | 完成 |
-| 8 | Ollama 本地大模型自动连接/选择/流式输出 | `ollama_client.py` | 完成 |
-| 9 | 全局骑行数据上下文管理器 | `data_context.py` | 完成 |
-| 10 | 串口日志重定向调试器 | `main.py` 内 `SerialDebugger` | 完成 |
+| 2 | 自定义圆形仪表盘控件 | `widgets/circle_gauge.py` | 完成 |
+| 3 | STM32 串口数据采集（JSON 协议） | `drivers/serial_handler.py` | 完成 |
+| 4 | 高德在线地图（JS API）+ 实时位置标记 | `widgets/map_widget.py` | 完成 |
+| 5 | 离线省份判断 + 语音播报 | `core/location_service.py` | 完成 |
+| 6 | Piper 本地 TTS + Edge-TTS 在线回退 | `drivers/audio/piper_voice.py` | 完成 |
+| 7 | 按钮语音交互（GPIO 17）+ LED 状态指示 | `drivers/audio/voice_recorder.py` | 完成 |
+| 8 | Ollama 本地大模型自动连接/选择/流式输出 | `llm/ollama_client.py` | 完成 |
+| 9 | 全局骑行数据上下文管理器 | `core/data_context.py` | 完成 |
+| 10 | 串口日志重定向调试器 | `utils/serial_debugger.py` | 完成 |
+| 11 | 经典蓝牙 RFCOMM Server | `drivers/ble_server.py` | 完成 |
+| 12 | WiFi WebSocket Server | `drivers/wifi_server.py` | 完成 |
+| 13 | 通信调度器（BLE + WiFi 统一调度） | `services/comm_service.py` | 完成 |
+| 14 | MQTT 调试桥接器（MQTTX 兼容） | `services/comm_service.py` | 完成 |
+| 15 | 断连缓存队列 | `persistence/buffer_queue.py` | 完成 |
 
 ---
 
 ## 3. 当前未完成的核心功能（按优先级排序）
 
-### P0 — 通信层（最大缺口，必须先补）
-- **BLE GATT Server**：树莓派作为 BLE Peripheral 向 App 广播骑行数据
-- **WiFi WebSocket Server**：高速数据通道 + 历史记录批量同步
-- **通信调度器**：统一调度 BLE/WiFi，自动切换主通道
-- **断连缓存补发**：防止信号中断丢数据
+### P0 — 通信层
+- **~~BLE RFCOMM Server~~** ✅ 已完成
+- **~~WiFi WebSocket Server~~** ✅ 已完成
+- **~~通信调度器 + MQTT 调试通道~~** ✅ 已完成
+- **~~断连缓存队列~~** ✅ 已完成
+- **断连缓存补发联调**：需要在真实断开/重连场景下验证批量补发逻辑
 
 ### P1 — 数据持久化与安全
 - **本地 FIT/GPX 文件存储**：骑行记录生成标准运动文件
@@ -87,68 +93,83 @@
 
 ---
 
-## 5. 目标目录结构
+## 5. 当前目录结构
 
-当前代码存在所有文件堆在根目录的问题，新功能应按以下结构开发：
+**步骤 0.1 目录重构已完成**。新功能应按以下结构继续开发：
 
 ```
 qt_project/
-├── main.py                      # 入口，仅做初始化
-├── app.py                       # QApplication + 全局异常处理（可选）
+├── main.py                      # 入口，仅剩 BikeComputerPro 主窗口逻辑
+├── app.py                       # [待建] QApplication + 全局异常处理
 │
-├── ui/                          # UI 层
+├── ui/                          # UI 页面层
 │   ├── ui_main_window.py
-│   ├── styles.qss
+│   ├── map_page.py              # 现有
+│   ├── smart_pinyin_ime.py      # 现有
+│   ├── styles.qss               # [待建] 统一 QSS 样式
 │   ├── history_page.py          # [待建] 历史记录页
 │   └── settings_page.py         # [待建] 设置页
 │
 ├── widgets/                     # 可复用控件
 │   ├── map_widget.py            # 现有
+│   ├── circle_gauge.py          # 现有（从 main.py 拆分）
+│   ├── small_data_box.py        # 现有（从 main.py 拆分）
 │   ├── metric_card.py           # [待建]
 │   └── message_bubble.py        # [待建]
 │
 ├── services/                    # 业务服务层 [待建]
-│   ├── comm_service.py          # BLE/WiFi 通信调度
-│   ├── ride_service.py          # 骑行会话管理
-│   ├── alert_service.py         # 安全告警
-│   ├── nav_engine.py            # 离线导航
-│   └── ai_assistant.py          # AI Agent（升级 ollama_client）
+│   ├── map_service.py           # 现有
+│   ├── comm_service.py          # 现有
+│   ├── ride_service.py          # [待建] 骑行会话管理
+│   ├── alert_service.py         # [待建] 安全告警
+│   ├── nav_engine.py            # [待建] 离线导航
+│   └── ai_assistant.py          # [待建] AI Agent（升级 ollama_client）
 │
-├── core/                        # 核心领域层 [待建]
-│   ├── data_context.py          # 现有，建议移入
-│   ├── protocol.py              # 数据协议定义
-│   ├── models.py                # RideRecord, GPSPoint 等数据类
-│   └── calculator.py            # 骑行指标计算
+├── core/                        # 核心领域层
+│   ├── data_context.py          # 现有
+│   ├── location_service.py      # 现有
+│   ├── protocol.py              # 现有
+│   ├── models.py                # [待建] RideRecord, GPSPoint 等
+│   └── calculator.py            # [待建] 骑行指标计算
 │
-├── drivers/                     # 硬件驱动层 [部分待建]
-│   ├── serial_reader.py         # 从 main.py 拆分
-│   ├── ble_server.py            # [待建] BLE GATT Server
+├── drivers/                     # 硬件驱动层
+│   ├── serial_handler.py        # 现有
+│   ├── ble_server.py            # 现有（RFCOMM 经典蓝牙）
 │   ├── ble_central.py           # [待建] BLE Central 连外设
-│   ├── wifi_server.py           # [待建] WebSocket Server
+│   ├── wifi_server.py           # 现有
 │   └── audio/                   # 语音子模块
 │       ├── voice_recorder.py    # 现有
 │       ├── piper_voice.py       # 现有
+│       ├── voice_final.py       # 现有
 │       └── asr_whisper.py       # [待建] 本地 ASR
 │
 ├── persistence/                 # 持久化层 [待建]
 │   ├── ride_repository.py       # FIT/GPX 读写
 │   ├── config_manager.py        # 配置管理
-│   ├── buffer_queue.py          # 断连缓存队列
+│   ├── buffer_queue.py          # 现有
 │   └── tile_cache_manager.py    # 离线瓦片管理
 │
-├── llm/                         # 大模型层 [待建]
-│   ├── ollama_client.py         # 现有，建议移入
-│   └── prompts.py               # 提示词模板
+├── llm/                         # 大模型层
+│   ├── ollama_client.py         # 现有
+│   └── prompts.py               # [待建] 提示词模板
+│
+├── utils/                       # 工具类
+│   └── serial_debugger.py       # 现有（从 main.py 拆分）
 │
 ├── scripts/                     # 运维脚本
 │   ├── download_tiles.py        # [待建] 瓦片预下载
-│   ├── setup_piper.sh
-│   └── setup_melotts.sh
+│   ├── setup_piper.sh           # 现有
+│   ├── setup_piper_hq.sh        # 现有
+│   ├── setup_melotts.sh         # 现有
+│   └── download_piper_model.sh  # 现有
 │
 └── tests/                       # 测试
-    ├── test_data_context.py
-    ├── test_navigation.py
-    └── test_voice_system.py
+    ├── test_data_context.py     # 现有
+    ├── test_navigation.py       # 现有
+    ├── test_voice_system.py     # 现有
+    ├── test_nav_console.py      # 现有
+    ├── test_nav_simple.py       # 现有
+    └── ...
 ```
 
 ---
@@ -172,10 +193,28 @@ qt_project/
 }
 ```
 
-### 树莓派 ↔ App（计划中）
-- **BLE 通道**：标准 GATT Characteristic（CSCS/CPS/HRS 兼容 + 自定义 Service 0xFF00）
-- **WiFi 通道**：JSON over WebSocket，或可选 Protobuf 压缩
-- **文件传输**：FIT / GPX 文件通过 WiFi 批量下发
+### 树莓派 ↔ App（已实现）
+- **BLE 通道**：经典蓝牙 RFCOMM，发送 18 字节紧凑二进制 + JSON 事件
+- **WiFi 通道**：JSON over WebSocket（端口 8765）
+- **MQTT 调试通道**：`paho-mqtt` 桥接，Topic 见下文
+- **文件传输**：FIT / GPX 文件通过 WiFi 批量下发（待实现）
+
+### MQTT 调试 Topic 定义
+| Topic | 方向 | 说明 |
+|-------|------|------|
+| `smartride/realtime` | 树莓派 → MQTTX | 每秒 1 次实时骑行数据（JSON） |
+| `smartride/event` | 树莓派 → MQTTX | 即时事件：告警、骑行状态变化 |
+| `smartride/buffer` | 树莓派 → MQTTX | 断连重连后的批量补发数据 |
+| `smartride/command` | MQTTX → 树莓派 | 发送调试命令（JSON），会被转发到主程序 |
+
+### MQTTX 连接配置
+| 配置项 | 值 |
+|--------|-----|
+| Host | `broker.emqx.io` |
+| Port | `1883` |
+| Protocol | `mqtt://` |
+
+> 使用公用 EMQ X Broker，任何联网设备均可订阅/发布。
 
 ---
 
@@ -184,13 +223,12 @@ qt_project/
 **当前最重要的问题：** 树莓派是"单点孤岛"——STM32 数据进来了，但无法稳定输出到 App。
 
 **建议的下一步开发顺序：**
-1. **代码目录重构**（把 `main.py` 拆成合理的模块结构）
-2. **定义统一协议**（`core/protocol.py`）
-3. **BLE GATT Server**（让 App 能连上树莓派并收到数据）
-4. **WiFi WebSocket Server**（高速通道，传文件用）
-5. **通信调度器**（`services/comm_service.py`）
-6. **本地 FIT 存储 + 骑行会话管理**
-7. **安全告警系统**
+1. **~~代码目录重构~~ ✅ 已完成**（步骤 0.1 已落地，文件已分层，import 已修复）
+2. **~~定义统一协议~~ ✅ 已完成**（`core/protocol.py` 已落地，`SensorData` 协议已接入串口数据流）
+3. **~~BLE + WiFi + CommService + MQTT 调试通道~~ ✅ 已完成**（经典蓝牙 RFCOMM + WebSocket + MQTT 桥接）
+4. **断连缓存补发联调**（`persistence/buffer_queue.py` 已就绪，需主流程联动测试）
+5. **安全告警系统**
+6. **离线地图 + 导航引擎**
 
 **不要先做/可以后放的功能：**
 - 行车记录仪、功率训练课程、云同步、组队骑行、OTA、防盗 —— 这些都属于锦上添花，先把 P0/P1 跑通。
@@ -199,9 +237,9 @@ qt_project/
 
 ## 8. 给 Claude Code 的开发提示
 
-1. **主文件 `main.py` 当前非常臃肿**：所有初始化、UI、控件、串口、调试器都在一个文件里。新增功能时应优先拆分到对应目录，不要再往 `main.py` 堆代码。
+1. **主文件 `main.py` 已瘦身**：`CircleGauge`、`SmallDataBox`、`SerialDebugger` 已分别拆分到 `widgets/` 和 `utils/` 目录。新增功能时应继续按分层目录开发，不要再往 `main.py` 堆代码。
 
-2. **语音模块已高度封装**：`voice_driver/piper_voice.py` 提供了 `HybridVoicePlayer`，支持离线 Piper 和在线 Edge-TTS 的自动切换。新功能需要语音播报时，优先复用它。
+2. **语音模块已高度封装**：`drivers/audio/piper_voice.py` 提供了 `HybridVoicePlayer`，支持离线 Piper 和在线 Edge-TTS 的自动切换。新功能需要语音播报时，优先复用它。
 
 3. **DataContext 是中心数据源**：所有需要向 LLM 提供上下文或向 UI 刷新数据的功能，都应通过 `data_context.py` 读写，不要绕过它直接改 UI。
 
@@ -217,11 +255,11 @@ qt_project/
 
 | 需求 | 修改位置 |
 |------|---------|
-| 新增数据字段显示 | `data_context.py` → `main.py` `on_data_received()` → UI 控件 |
-| 新增语音播报场景 | 复用 `voice_driver/piper_voice.py` 的 `speak()` |
-| 新增 AI 回答能力 | 改 `ollama_client.py` 的 system prompt 或 model 参数 |
+| 新增数据字段显示 | `core/data_context.py` → `main.py` `on_data_received()` → UI 控件 |
+| 新增语音播报场景 | 复用 `drivers.audio.piper_voice` 的 `speak()` |
+| 新增 AI 回答能力 | 改 `llm/ollama_client.py` 的 system prompt 或 model 参数 |
 | 新增 BLE 服务 | 新建 `drivers/ble_server.py`，在 `main.py` 初始化 |
-| 新增地图交互 | `map_widget.py` |
+| 新增地图交互 | `widgets/map_widget.py` |
 | 新增骑行记录保存 | 新建 `persistence/ride_repository.py` |
 
 ---

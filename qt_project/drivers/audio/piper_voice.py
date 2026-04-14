@@ -207,7 +207,7 @@ class HybridVoicePlayer:
         
         # 初始化在线播放器 (Edge-TTS)
         try:
-            from voice_driver.voice_final import FinalVoicePlayer
+            from .voice_final import FinalVoicePlayer
             self._online_player = FinalVoicePlayer(voice, message_callback)
             print("[HybridVoice] 在线播放器 (Edge-TTS) 已加载")
         except Exception as e:
@@ -217,7 +217,7 @@ class HybridVoicePlayer:
         # 初始化离线播放器 (使用新的 OfflineVoicePlayer)
         try:
             # 尝试使用增强版离线语音
-            from voice_driver.offline_voice import OfflineVoicePlayer
+            from .offline_voice import OfflineVoicePlayer
             self._offline_player = OfflineVoicePlayer(
                 audio_device="plughw:2,0",
                 message_callback=message_callback

@@ -9,6 +9,8 @@ import threading
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
+from core.protocol import SensorData
+
 
 @dataclass
 class RideData:
@@ -19,6 +21,7 @@ class RideData:
     distance: float = 0.0       # 距离 km
     ride_time: int = 0          # 骑行时间秒
     slope: float = 0.0          # 坡度 %
+    posture: int = 0            # 骑行姿态
     temperature: float = 0.0    # 温度 °C
     heart_rate: float = 0.0     # 心率 bpm
     rear_dist: float = 0.0      # 后方距离 m
@@ -49,6 +52,8 @@ class RideData:
         if self.slope != 0:
             prefix = "上坡" if self.slope > 0 else "下坡"
             parts.append(f"{prefix}坡度{abs(self.slope):.1f}%")
+        if self.posture != 0:
+            parts.append("注意骑行姿态异常")
         if self.temperature > 0:
             parts.append(f"环境温度{self.temperature:.1f}摄氏度")
         if self.heart_rate > 0:
@@ -97,6 +102,22 @@ class DataContextManager:
                     if old_value != value:
                         print(f"[DataContext] 更新 {key}: {old_value} -> {value}")
     
+    def update_from_sensor(self, sensor: SensorData):
+        """从协议层 SensorData 批量更新上下文"""
+        update_dict = {
+            "speed": sensor.speed,
+            "power": sensor.power,
+            "cadence": sensor.cadence,
+            "distance": sensor.distance,
+            "ride_time": sensor.ride_time,
+            "slope": sensor.slope,
+            "posture": sensor.posture,
+            "temperature": sensor.temperature,
+            "heart_rate": sensor.heart_rate,
+            "rear_dist": sensor.rear_dist,
+        }
+        self.update_data(**update_dict)
+
     def get_data(self) -> RideData:
         """获取当前数据副本"""
         with self._data_lock:

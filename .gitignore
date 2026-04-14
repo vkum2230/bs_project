@@ -1,0 +1,21 @@
+# Large binaries
+*.gguf
+*.tgz
+*.tar.gz
+*.zip
+*.bin
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.claude/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

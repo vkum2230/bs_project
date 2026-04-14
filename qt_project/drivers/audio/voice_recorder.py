@@ -476,7 +476,7 @@ class ButtonVoiceAssistant:
     def _init_button(self):
         """初始化按钮"""
         try:
-            from voice_driver import ButtonHandler, ButtonEvent
+            from .button_handler import ButtonHandler, ButtonEvent
             
             self.button_handler = ButtonHandler(pin=self.button_pin)
             
@@ -581,7 +581,7 @@ class ButtonVoiceAssistant:
                     try:
                         import sys
                         sys.path.insert(0, '/home/hedya/Desktop/bs_project/qt_project')
-                        from data_context import get_data_context
+                        from core.data_context import get_data_context
                         d = get_data_context().get_data()
                         
                         # 只检测明确的数据查询关键词

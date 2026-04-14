@@ -33,7 +33,7 @@ class OfflineVoicePlayer:
     def _init_piper(self):
         """初始化 Piper"""
         try:
-            from voice_driver.piper_voice import PiperVoicePlayer
+            from .piper_voice import PiperVoicePlayer
             self._piper = PiperVoicePlayer(
                 audio_device=self._audio_device,
                 message_callback=self._message_callback

@@ -1,0 +1,11 @@
+FROM ./Llama-3.2-3B-Instruct-Q4_K_M.gguf
+
+TEMPLATE """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+你是骑行助手小智，可以回答骑行、路线、天气等问题。<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+{{ .Prompt }}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+"""
+
+PARAMETER stop <|end_of_text|>

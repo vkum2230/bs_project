@@ -9,167 +9,22 @@ import math
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, 
                              QHBoxLayout, QFrame, QPushButton, QStackedWidget,
                              QGridLayout, QSizePolicy, QWidget)
-from PyQt5.QtCore import QTimer, QDateTime, Qt, QRect
-from PyQt5.QtGui import QFont, QPixmap, QCursor, QPainter, QColor, QPen, QFontMetrics
+from PyQt5.QtCore import QTimer, QDateTime, Qt
+from PyQt5.QtGui import QFont, QPixmap, QCursor
 
 os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
 
-from serial_handler import SerialReader
-from location_service import LocationService
-from map_widget import MapWidget
-from voice_driver import VoicePlayer, LEDController
-from voice_driver.voice_recorder import ButtonVoiceAssistant
-from ollama_client import OllamaClient, DEFAULT_SYSTEM_PROMPT
-
-
-class SerialDebugger:
-    """全局串口日志重定向器"""
-    def __init__(self, port='/dev/ttyAMA10', baudrate=115200):
-        try:
-            self.debug_serial = serial.Serial(port, baudrate, timeout=1)
-            self.original_stdout = sys.stdout
-            boot_msg = "\r\n" + "="*40 + "\r\n  SMART RIDE SYSTEM DEBUG ONLINE\r\n" + "="*40 + "\r\n"
-            self.debug_serial.write(boot_msg.encode('utf-8'))
-            sys.stdout = self
-        except Exception as e:
-            print(f"无法打开调试串口 {port}: {e}")
-            self.debug_serial = None
-
-    def write(self, message):
-        self.original_stdout.write(message)
-        if self.debug_serial and self.debug_serial.is_open:
-            msg_crlf = message.replace('\n', '\r\n')
-            self.debug_serial.write(msg_crlf.encode('utf-8'))
-            self.debug_serial.flush()
-
-    def flush(self):
-        self.original_stdout.flush()
-        
-    def stop(self):
-        if self.debug_serial and self.debug_serial.is_open:
-            self.debug_serial.close()
-            sys.stdout = self.original_stdout
-
-
-class CircleGauge(QWidget):
-    """圆形仪表盘"""
-    def __init__(self, title, unit, max_value, color1="#4DB8FF", parent=None):
-        super().__init__(parent)
-        self.title = title
-        self.unit = unit
-        self.max_value = max_value
-        self.color1 = QColor(color1)
-        self.value = 0.0
-        self.setMinimumSize(170, 170)
-        self.setMaximumSize(190, 190)
-        
-    def set_value(self, value):
-        self.value = float(value)
-        self.update()
-        
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        width = self.width()
-        height = self.height()
-        size = min(width, height) - 8
-        rect = QRect((width - size) // 2, (height - size) // 2, size, size)
-        
-        # 背景圆环
-        pen_bg = QPen(QColor("#3A3A3A"))
-        pen_bg.setWidth(10)
-        painter.setPen(pen_bg)
-        painter.drawEllipse(rect)
-        
-        # 进度圆弧
-        angle = int(270 * min(self.value / self.max_value, 1.0))
-        pen_arc = QPen(self.color1)
-        pen_arc.setWidth(10)
-        pen_arc.setCapStyle(Qt.RoundCap)
-        painter.setPen(pen_arc)
-        painter.drawArc(rect, 225 * 16, -angle * 16)
-        
-        # 中心数值
-        painter.setPen(QColor("#FFFFFF"))
-        font = QFont("Arial", 32, QFont.Bold)
-        painter.setFont(font)
-        value_text = f"{self.value:.1f}" if self.value < 100 else f"{int(self.value)}"
-        fm = QFontMetrics(font)
-        text_rect = fm.boundingRect(value_text)
-        painter.drawText((width - text_rect.width()) // 2, height // 2 - 8, value_text)
-        
-        # 单位
-        painter.setPen(QColor("#888888"))
-        font_unit = QFont("Helvetica", 11)
-        painter.setFont(font_unit)
-        fm_unit = QFontMetrics(font_unit)
-        unit_rect = fm_unit.boundingRect(self.unit)
-        painter.drawText((width - unit_rect.width()) // 2, height // 2 + 20, self.unit)
-        
-        # 标题
-        painter.setPen(self.color1)
-        font_title = QFont("Helvetica", 13, QFont.Bold)
-        painter.setFont(font_title)
-        fm_title = QFontMetrics(font_title)
-        title_rect = fm_title.boundingRect(self.title)
-        painter.drawText((width - title_rect.width()) // 2, height - 12, self.title)
-        
-        painter.end()
-
-
-class SmallDataBox(QFrame):
-    """右侧数据格子"""
-    def __init__(self, title, unit, icon_text="●", color="#888888", parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.StyledPanel)
-        self.color = QColor(color)
-        self.setStyleSheet(f"""
-            SmallDataBox {{
-                background-color: #353535;
-                border-radius: 8px;
-                border: 1px solid #4A4A4A;
-            }}
-        """)
-        
-        layout = QVBoxLayout(self)
-        layout.setSpacing(2)
-        layout.setContentsMargins(6, 4, 6, 4)
-        
-        # 顶部：图标+标题
-        header = QHBoxLayout()
-        header.setSpacing(4)
-        header.setAlignment(Qt.AlignCenter)
-        
-        icon = QLabel(icon_text)
-        icon.setStyleSheet(f"color: {color}; background: transparent;")
-        icon.setFont(QFont("Helvetica", 11))
-        header.addWidget(icon)
-        
-        title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {color}; background: transparent;")
-        title_label.setFont(QFont("Helvetica", 10))
-        header.addWidget(title_label)
-        layout.addLayout(header)
-        
-        # 数值
-        self.value_label = QLabel("--")
-        self.value_label.setStyleSheet("color: #FFFFFF; background: transparent;")
-        self.value_label.setFont(QFont("Arial", 20, QFont.Bold))
-        self.value_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.value_label)
-        
-        # 单位
-        unit_label = QLabel(unit)
-        unit_label.setStyleSheet("color: #666666; background: transparent;")
-        unit_label.setFont(QFont("Helvetica", 9))
-        unit_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(unit_label)
-        
-    def update_value(self, value, color=None):
-        self.value_label.setText(str(value))
-        if color:
-            self.value_label.setStyleSheet(f"color: {color}; background: transparent;")
+from drivers.serial_handler import SerialReader
+from core.location_service import LocationService
+from widgets.map_widget import MapWidget
+from widgets.circle_gauge import CircleGauge
+from widgets.small_data_box import SmallDataBox
+from utils.serial_debugger import SerialDebugger
+from drivers.audio import VoicePlayer, LEDController
+from drivers.audio.voice_recorder import ButtonVoiceAssistant
+from llm.ollama_client import OllamaClient, DEFAULT_SYSTEM_PROMPT
+from core.protocol import SensorData, RideSessionState
+from services.comm_service import CommService
 
 
 class BikeComputerPro(QWidget):
@@ -199,7 +54,7 @@ class BikeComputerPro(QWidget):
         
         # 方案0: 混合语音播放器（在线Edge-TTS + 离线Piper）
         try:
-            from voice_driver.piper_voice import HybridVoicePlayer
+            from drivers.audio.piper_voice import HybridVoicePlayer
             self.voice_player = HybridVoicePlayer(
                 voice='xiaoxiao',
                 message_callback=self.add_voice_message  # 传入消息回调，播报时自动显示
@@ -212,7 +67,7 @@ class BikeComputerPro(QWidget):
         # 方案1: ReSpeaker 专用播放器（备用）
         if not voice_initialized:
             try:
-                from voice_driver.voice_respeaker import ReSpeakerVoicePlayer
+                from drivers.audio.voice_respeaker import ReSpeakerVoicePlayer
                 self.voice_player = ReSpeakerVoicePlayer()
                 print("[Main] ReSpeaker 语音播放器初始化成功")
                 voice_initialized = True
@@ -222,7 +77,7 @@ class BikeComputerPro(QWidget):
         # 方案1: 标准 VoicePlayer
         if not voice_initialized:
             try:
-                from voice_driver import VoicePlayer, LEDController
+                from drivers.audio import VoicePlayer, LEDController
                 self.voice_player = VoicePlayer()
                 print("[Main] 语音播放器初始化成功")
                 voice_initialized = True
@@ -232,7 +87,7 @@ class BikeComputerPro(QWidget):
         # 方案2: AOSS 包装器播放器
         if not voice_initialized:
             try:
-                from voice_driver.voice_aoss import AOSSVoicePlayer
+                from drivers.audio.voice_aoss import AOSSVoicePlayer
                 self.voice_player = AOSSVoicePlayer()
                 print("[Main] AOSS 语音播放器初始化成功")
                 voice_initialized = True
@@ -242,7 +97,7 @@ class BikeComputerPro(QWidget):
         # 方案3: PyAudio 播放器
         if not voice_initialized:
             try:
-                from voice_driver.voice_pyaudio import PyAudioVoicePlayer
+                from drivers.audio.voice_pyaudio import PyAudioVoicePlayer
                 self.voice_player = PyAudioVoicePlayer()
                 print("[Main] PyAudio 语音播放器初始化成功")
                 voice_initialized = True
@@ -252,7 +107,7 @@ class BikeComputerPro(QWidget):
         # 方案4: pygame 播放器
         if not voice_initialized:
             try:
-                from voice_driver.voice_pygame import PygameVoicePlayer
+                from drivers.audio.voice_pygame import PygameVoicePlayer
                 self.voice_player = PygameVoicePlayer()
                 print("[Main] Pygame 语音播放器初始化成功")
                 voice_initialized = True
@@ -294,7 +149,7 @@ class BikeComputerPro(QWidget):
         
         # LED 控制器
         try:
-            from voice_driver import LEDController
+            from drivers.audio import LEDController
             self.led_controller = LEDController()
             self.led_controller.start_pattern("breath", LEDController.COLOR_CYAN)
             print("[Main] LED 控制器初始化成功")
@@ -325,6 +180,22 @@ class BikeComputerPro(QWidget):
                 print("[Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）")
             except Exception as e:
                 print(f"[Main] 按钮语音助手初始化失败: {e}")
+        # ==================================
+
+        # ========== 通信服务初始化 ==========
+        self.comm_service = CommService(parent=self)
+        self.comm_service.command_received.connect(self.on_app_command)
+        def _on_ble_connected(addr: str):
+            print(f"[Main] BLE App 已连接: {addr}")
+            self.add_voice_message("蓝牙连接成功", icon="🔵")
+
+        self.comm_service.ble_client_connected.connect(_on_ble_connected)
+        self.comm_service.wifi_client_connected.connect(
+            lambda addr: print(f"[Main] WiFi App 已连接: {addr}")
+        )
+        self.comm_service.event_pushed.connect(self.on_comm_event)
+        self.comm_service.start()
+        print("[Main] 通信服务已启动（BLE + WiFi）")
         # ==================================
 
         self.current_province = None
@@ -766,39 +637,24 @@ class BikeComputerPro(QWidget):
                 self.voice_assistant.stop()
             except:
                 pass
+        if hasattr(self, 'comm_service'):
+            try:
+                self.comm_service.stop()
+            except:
+                pass
         self.close()
 
     def on_data_received(self, data):
         formatted_data = json.dumps(data, indent=2, ensure_ascii=False)
         print(formatted_data)
 
-        # 更新数据上下文（供大模型使用）
+        # 解析为协议层 SensorData
         try:
-            from data_context import get_data_context
-            data_ctx = get_data_context()
-            update_dict = {}
-            
-            if "speed" in data:
-                update_dict["speed"] = float(data["speed"])
-            if "power" in data:
-                update_dict["power"] = float(data["power"])
-            if "cadence" in data:
-                update_dict["cadence"] = float(data["cadence"])
-            if "distance" in data:
-                update_dict["distance"] = float(data["distance"])
-            if "ride_time" in data:
-                update_dict["ride_time"] = int(data["ride_time"])
-            if "slope" in data:
-                update_dict["slope"] = float(data["slope"])
-            if "temperature" in data:
-                update_dict["temperature"] = float(data["temperature"])
-            if "heart_rate" in data:
-                update_dict["heart_rate"] = float(data["heart_rate"])
-            if "rear_dist" in data:
-                update_dict["rear_dist"] = float(data["rear_dist"])
-            
-            if update_dict:
-                data_ctx.update_data(**update_dict)
+            from core.data_context import get_data_context
+            sensor = SensorData.from_stm32_json(data)
+            get_data_context().update_from_sensor(sensor)
+            # 推送到通信服务（由 CommService 决定何时发给 App）
+            self.comm_service.on_sensor_data(sensor)
         except Exception as e:
             print(f"[DataContext] 更新失败: {e}")
 
@@ -828,6 +684,11 @@ class BikeComputerPro(QWidget):
             prefix = "+" if val > 0 else ""
             color = "#e74c3c" if abs(val) > 10 else "#2ecc71" if val > 0 else "#FFFFFF"
             self.box_slope.update_value(f"{prefix}{val:.1f}", color)
+            
+        if "posture" in data:
+            val = int(data["posture"])
+            if val != 0:
+                self.box_slope.update_value("姿态异常", "#e74c3c")
             
         if "temperature" in data:
             val = float(data["temperature"])
@@ -871,7 +732,7 @@ class BikeComputerPro(QWidget):
 
         # 2. 更新数据上下文中的位置
         try:
-            from data_context import get_data_context
+            from core.data_context import get_data_context
             get_data_context().update_data(location=province)
         except Exception as e:
             print(f"[DataContext] 更新位置失败: {e}")
@@ -1109,6 +970,50 @@ class BikeComputerPro(QWidget):
                 print(f"[LED] 设置绿色失败: {e}")
         
         print("[Voice] ========== 欢迎语音处理完成 ==========")
+
+    def on_app_command(self, cmd):
+        """处理 App 发来的命令"""
+        from core.protocol import AppCommandType
+        print(f"[Main] 执行 App 命令: {cmd.cmd_type.value}")
+        
+        if cmd.cmd_type == AppCommandType.START_RIDE:
+            self.comm_service.set_ride_state(RideSessionState.RIDING)
+            self.add_voice_message("骑行开始", icon="🚴")
+            if self.voice_player:
+                self.voice_player.speak("骑行开始")
+                
+        elif cmd.cmd_type == AppCommandType.PAUSE_RIDE:
+            self.comm_service.set_ride_state(RideSessionState.PAUSED)
+            self.add_voice_message("骑行暂停", icon="⏸")
+            
+        elif cmd.cmd_type == AppCommandType.RESUME_RIDE:
+            self.comm_service.set_ride_state(RideSessionState.RIDING)
+            self.add_voice_message("骑行继续", icon="▶")
+            
+        elif cmd.cmd_type == AppCommandType.STOP_RIDE:
+            self.comm_service.set_ride_state(RideSessionState.FINISHED)
+            self.add_voice_message("骑行结束", icon="🏁")
+            if self.voice_player:
+                self.voice_player.speak("骑行结束")
+                
+        elif cmd.cmd_type == AppCommandType.PING:
+            # 心跳响应，CommService 会自动保持连接
+            pass
+            
+        else:
+            print(f"[Main] 未处理的命令: {cmd.cmd_type.value}")
+
+    def on_comm_event(self, event_type, payload):
+        """处理通信服务推送的事件（如告警）"""
+        msg = payload.get("message", "")
+        if event_type == "alert" and msg:
+            self.add_voice_message(msg, icon="⚠️")
+            if self.voice_player:
+                level = payload.get("level", "warning")
+                # critical 级别用红灯闪烁，warning 用黄灯
+                if self.led_controller and level == "critical":
+                    self.led_controller.start_pattern("flash", LEDController.COLOR_RED)
+                self.voice_player.speak(msg)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape: 

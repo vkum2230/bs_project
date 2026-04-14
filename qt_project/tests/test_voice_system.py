@@ -68,7 +68,7 @@ def test_piper():
     print("3. Piper 离线语音测试")
     print("="*50)
     
-    from voice_driver.piper_voice import PiperVoicePlayer
+    from drivers.audio.piper_voice import PiperVoicePlayer
     
     player = PiperVoicePlayer()
     
@@ -94,7 +94,7 @@ def test_hybrid():
     print("4. 混合播放器测试")
     print("="*50)
     
-    from voice_driver.piper_voice import HybridVoicePlayer
+    from drivers.audio.piper_voice import HybridVoicePlayer
     
     player = HybridVoicePlayer()
     

@@ -7,7 +7,7 @@
 import sys
 sys.path.insert(0, '/home/hedya/Desktop/bs_project/qt_project')
 
-from data_context import get_data_context, RideData
+from core.data_context import get_data_context, RideData
 
 
 def test_basic():

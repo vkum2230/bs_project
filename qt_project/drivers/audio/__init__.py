@@ -11,8 +11,8 @@
 - button_handler: 按钮事件处理器
 
 使用示例:
-    from voice_driver import VoicePlayer, LEDController, ButtonHandler, ButtonEvent
-    from voice_driver.voice_recorder import ButtonVoiceAssistant
+    from drivers.audio import VoicePlayer, LEDController, ButtonHandler, ButtonEvent
+    from drivers.audio.voice_recorder import ButtonVoiceAssistant
     
     # 语音播报
     voice = VoicePlayer()
