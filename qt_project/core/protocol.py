@@ -39,6 +39,7 @@ class AppCommandType(Enum):
     LOAD_ROUTE = "load_route"          # 加载 GPX 路线
     REQUEST_HISTORY = "request_history" # 请求历史记录列表
     REQUEST_FIT = "request_fit"         # 请求下载 FIT 文件
+    REQUEST_GPX = "request_gpx"         # 请求下载 GPX 文件
     UPDATE_CONFIG = "update_config"     # 更新用户配置
     PING = "ping"                       # 心跳/连接检测
 

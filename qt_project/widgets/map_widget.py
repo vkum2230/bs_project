@@ -2685,7 +2685,12 @@ class MapWidget(QWidget):
             if (window.startMarker) {{ map.remove(window.startMarker); window.startMarker = null; }}
             if (window.endMarker) {{ map.remove(window.endMarker); window.endMarker = null; }}
             if (window.navArrowMarker) {{ map.remove(window.navArrowMarker); window.navArrowMarker = null; }}
-            
+
+            // 清除历史轨迹
+            if (window.historyLine) {{ map.remove(window.historyLine); window.historyLine = null; }}
+            if (window.historyStartMarker) {{ map.remove(window.historyStartMarker); window.historyStartMarker = null; }}
+            if (window.historyEndMarker) {{ map.remove(window.historyEndMarker); window.historyEndMarker = null; }}
+
             // 清除数据
             destPos = null;
             window.routeStartPos = null;
@@ -3032,3 +3037,56 @@ class MapWidget(QWidget):
 
     def clear_track(self):
         self.web_view.page().runJavaScript("clearAll();")
+
+    def load_history_track(self, track_points):
+        """
+        加载历史轨迹到地图
+        track_points: [{"lat": float, "lon": float}, ...]
+        """
+        if not track_points:
+            return
+        path_js = str([[p["lon"], p["lat"]] for p in track_points])
+        start = track_points[0]
+        end = track_points[-1]
+        js = f"""
+            clearAll();
+            var historyPath = {path_js};
+            if (historyPath.length > 0) {{
+                window.historyLine = new AMap.Polyline({{
+                    path: historyPath,
+                    strokeColor: '#2ecc71',
+                    strokeWeight: 4,
+                    strokeOpacity: 0.9,
+                    map: map,
+                    showDir: true
+                }});
+
+                window.historyStartMarker = new AMap.Marker({{
+                    position: [{start['lon']}, {start['lat']}],
+                    map: map,
+                    icon: new AMap.Icon({{
+                        size: new AMap.Size(24, 24),
+                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/start.png',
+                        imageSize: new AMap.Size(24, 24)
+                    }}),
+                    title: '起点'
+                }});
+
+                window.historyEndMarker = new AMap.Marker({{
+                    position: [{end['lon']}, {end['lat']}],
+                    map: map,
+                    icon: new AMap.Icon({{
+                        size: new AMap.Size(24, 24),
+                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/end.png',
+                        imageSize: new AMap.Size(24, 24)
+                    }}),
+                    title: '终点'
+                }});
+
+                // 延迟执行 setFitView，确保 overlay 已渲染
+                setTimeout(function() {{
+                    map.setFitView([window.historyLine, window.historyStartMarker, window.historyEndMarker]);
+                }}, 200);
+            }}
+        """
+        self.web_view.page().runJavaScript(js)

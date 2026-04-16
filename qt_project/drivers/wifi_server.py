@@ -118,6 +118,17 @@ class WifiServer(QThread):
         except Exception as e:
             print(f"[WifiServer] broadcast 异常: {e}")
 
+    def broadcast_binary(self, data: bytes):
+        """向所有已连接客户端广播二进制消息（线程安全）"""
+        if not (self._loop and self._loop.is_running() and self.isRunning()):
+            return
+        try:
+            self._loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self._broadcast_binary_async(data))
+            )
+        except Exception as e:
+            print(f"[WifiServer] broadcast_binary 异常: {e}")
+
     async def _broadcast_async(self, message: str):
         """异步广播实现"""
         with self._lock:
@@ -126,6 +137,22 @@ class WifiServer(QThread):
             return
         tasks = [self._send_to(ws, message) for ws in clients]
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _broadcast_binary_async(self, data: bytes):
+        """异步广播二进制实现"""
+        with self._lock:
+            clients = list(self._clients)
+        if not clients:
+            return
+        tasks = [self._send_binary_to(ws, data) for ws in clients]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _send_binary_to(self, websocket, data: bytes):
+        """向单个客户端发送二进制消息"""
+        try:
+            await websocket.send(data)
+        except Exception:
+            pass
 
     def has_connected_client(self) -> bool:
         """是否有 App 已连接"""

@@ -31,12 +31,13 @@ class FinalVoicePlayer:
         'yunxi': 'zh-CN-YunxiNeural',
     }
     
-    def __init__(self, voice: str = 'xiaoxiao', message_callback=None):
+    def __init__(self, voice: str = 'xiaoxiao', message_callback=None, fallback_to_espeak: bool = True):
         self.voice = self.EDGE_VOICES.get(voice, voice)
         self._lock = threading.Lock()
         self._audio_device = "plughw:2,0"  # ReSpeaker 设备（plughw 支持自动格式转换）
         self._message_callback = message_callback  # 消息回调，用于在UI显示播报内容
-        
+        self._fallback_to_espeak = fallback_to_espeak
+
         # 检查 edge-tts
         try:
             import edge_tts
@@ -44,25 +45,32 @@ class FinalVoicePlayer:
             print(f"[FinalVoice] Edge-TTS 就绪，使用语音: {self.voice}")
         except ImportError:
             self._edge_tts = None
-            print("[FinalVoice] Edge-TTS 未安装，将使用 espeak")
+            if fallback_to_espeak:
+                print("[FinalVoice] Edge-TTS 未安装，将使用 espeak")
+            else:
+                print("[FinalVoice] Edge-TTS 未安装，且已禁用 espeak 兜底")
     
-    def speak(self, text: str, block: bool = False, show_in_ui: bool = True) -> bool:
+    def speak(self, text: str, block: bool = False, show_in_ui: bool = True, fallback_to_espeak: bool = None) -> bool:
         """播报文本
-        
+
         Args:
             text: 要播报的文本
             block: 是否阻塞等待
             show_in_ui: 是否在UI消息框中显示（默认True）
+            fallback_to_espeak: 是否允许兜底到 espeak，None 则使用初始化时的默认值
         """
         if not text:
             return False
-        
+
+        if fallback_to_espeak is None:
+            fallback_to_espeak = self._fallback_to_espeak
+
         print(f"[FinalVoice] 播报: {text[:50]}")
-        
+
         # 在UI消息框中显示播报内容
         if show_in_ui and self._message_callback:
             self._message_callback(text, icon="🔊")
-        
+
         def _do_speak():
             with self._lock:
                 # 优先尝试 Edge-TTS
@@ -75,13 +83,20 @@ class FinalVoicePlayer:
                         loop.close()
                         if result:
                             return True
-                        print("[FinalVoice] Edge-TTS 失败，使用备用")
+                        print("[FinalVoice] Edge-TTS 失败")
+                        if not fallback_to_espeak:
+                            return False
+                        print("[FinalVoice] 使用 espeak 备用")
                     except Exception as e:
                         print(f"[FinalVoice] Edge-TTS 错误: {e}")
-                
+                        if not fallback_to_espeak:
+                            return False
+
                 # 备用：espeak
-                return self._speak_espeak(text)
-        
+                if fallback_to_espeak:
+                    return self._speak_espeak(text)
+                return False
+
         if block:
             return _do_speak()
         else:

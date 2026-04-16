@@ -206,9 +206,15 @@ class HybridVoicePlayer:
         self._offline_player = None
         
         # 初始化在线播放器 (Edge-TTS)
+        # 使用 FinalVoicePlayer（基于 asyncio + edge_tts Python API，比 CLI 更稳定）
+        # 但禁用其内部的 espeak 兜底，这样 Edge-TTS 失败时才能正确 fallback 到 Piper
         try:
             from .voice_final import FinalVoicePlayer
-            self._online_player = FinalVoicePlayer(voice, message_callback)
+            self._online_player = FinalVoicePlayer(
+                voice=voice,
+                message_callback=message_callback,
+                fallback_to_espeak=False
+            )
             print("[HybridVoice] 在线播放器 (Edge-TTS) 已加载")
         except Exception as e:
             print(f"[HybridVoice] 在线播放器加载失败: {e}")
@@ -276,30 +282,35 @@ class HybridVoicePlayer:
                 has_network = self._check_network()
                 print(f"[HybridVoice] 网络状态: {'可用' if has_network else '不可用'}")
                 
+                # UI 回调统一在这里处理
+                if show_in_ui and self._message_callback:
+                    self._message_callback(text, icon="🔊")
+
                 # 优先尝试在线播放（Edge-TTS），带超时
                 if self._online_player and has_network:
                     print("[HybridVoice] 优先尝试 Edge-TTS 在线播报（20秒超时）...")
                     try:
                         import threading
                         edge_result = [None]
-                        
+
                         def _edge_speak():
                             try:
                                 print("[HybridVoice] Edge-TTS 线程启动...")
-                                edge_result[0] = self._online_player.speak(text, block=True, show_in_ui=show_in_ui)
+                                # UI 回调由 HybridVoicePlayer 统一处理，在线播放器不重复显示
+                                edge_result[0] = self._online_player.speak(text, block=True, show_in_ui=False)
                                 print(f"[HybridVoice] Edge-TTS 线程完成，结果: {edge_result[0]}")
                             except Exception as e:
                                 print(f"[HybridVoice] Edge-TTS 线程错误: {e}")
                                 import traceback
                                 traceback.print_exc()
                                 edge_result[0] = False
-                        
+
                         edge_thread = threading.Thread(target=_edge_speak)
                         edge_thread.daemon = True
                         edge_thread.start()
                         print("[HybridVoice] 等待 Edge-TTS 完成...")
                         edge_thread.join(timeout=20)  # 最多等待20秒
-                        
+
                         if edge_thread.is_alive():
                             print("[HybridVoice] ✗ Edge-TTS 超时（20秒），切换到离线语音")
                         elif edge_result[0] is True:

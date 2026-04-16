@@ -17,6 +17,7 @@
 """
 
 import json
+import os
 import time
 import uuid
 from typing import List, Optional, Callable
@@ -34,6 +35,7 @@ from core.protocol import (
 from drivers.ble_server import BleServer
 from drivers.wifi_server import WifiServer
 from persistence.buffer_queue import BufferQueue
+from persistence.ride_repository import RideRepository
 
 
 # ==============================================================================
@@ -243,9 +245,10 @@ class CommService(QObject):
     data_pushed = pyqtSignal(AppRealtimeData)
     event_pushed = pyqtSignal(str, dict)  # event_type, payload
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, ride_repo: Optional[RideRepository] = None):
         super().__init__(parent)
         self.ride_state = RideSessionState.IDLE
+        self.ride_repo = ride_repo
 
         # 数据缓存与断连队列
         self.data_buffer = DataBuffer(window_seconds=1.0)
@@ -310,8 +313,8 @@ class CommService(QObject):
         """每收到一条 STM32 数据就调用"""
         self.data_buffer.push(sensor)
 
-        # 实时检测并推送事件（不依赖定时器）
-        self._check_and_emit_events(sensor)
+        # 注：实时告警检测已迁移到 AlertService，避免重复鬼畜
+        # CommService 仍保留 _check_and_emit_events 作为旧接口兼容，但不在此自动调用
 
     def set_ride_state(self, state: RideSessionState):
         """更新当前骑行状态"""
@@ -397,6 +400,12 @@ class CommService(QObject):
         except ValueError:
             return AlertType.REAR_VEHICLE
 
+    def send_alert(self, alert_type, message: str, level: str = "warning"):
+        """公开接口：发送告警事件到 App（供 AlertService 调用）"""
+        from core.protocol import build_alert_payload
+        payload = build_alert_payload(alert_type, message, level)
+        self._push_event("alert", payload)
+
     def _push_event(self, event_type: str, payload: dict):
         """立即推送事件到可用通道（蓝牙优先）"""
         self.event_pushed.emit(event_type, payload)
@@ -455,9 +464,72 @@ class CommService(QObject):
         try:
             cmd = AppCommand.from_json(text)
             print(f"[CommService] 收到 [{channel}] 命令: {cmd.cmd_type.value}")
+
+            # 文件与数据请求由 CommService 直接响应
+            if cmd.cmd_type == AppCommandType.REQUEST_HISTORY:
+                self._handle_request_history()
+                return
+            if cmd.cmd_type == AppCommandType.REQUEST_FIT:
+                self._handle_request_file(cmd.payload, "fit")
+                return
+            if cmd.cmd_type == AppCommandType.REQUEST_GPX:
+                self._handle_request_file(cmd.payload, "gpx")
+                return
+
             self.command_received.emit(cmd)
         except Exception as e:
             print(f"[CommService] 命令解析失败: {e}, 原文: {text}")
+
+    def _handle_request_history(self):
+        """响应历史记录列表请求"""
+        if not self.ride_repo:
+            self._reply_json({"event": "history_list", "data": [], "error": "repo not ready"})
+            return
+        rides = self.ride_repo.list_rides(limit=50)
+        self._reply_json({"event": "history_list", "data": rides})
+
+    def _handle_request_file(self, payload: dict, ext: str):
+        """响应 FIT/GPX 文件下载请求"""
+        ride_id = payload.get("ride_id", "")
+        if not ride_id or not self.ride_repo:
+            self._reply_json({"event": "file_response", "error": "missing ride_id or repo"})
+            return
+
+        meta = self.ride_repo.get_ride(ride_id)
+        if not meta:
+            self._reply_json({"event": "file_response", "error": "ride not found"})
+            return
+
+        path_key = f"{ext}_path"
+        file_path = meta.get(path_key, "")
+        if not file_path or not os.path.exists(file_path):
+            self._reply_json({"event": "file_response", "error": f"{ext} file not found"})
+            return
+
+        try:
+            import base64
+            with open(file_path, "rb") as f:
+                data = f.read()
+            encoded = base64.b64encode(data).decode("utf-8")
+            self._reply_json({
+                "event": "file_response",
+                "type": ext,
+                "ride_id": ride_id,
+                "filename": os.path.basename(file_path),
+                "size": len(data),
+                "data": encoded,
+            })
+            print(f"[CommService] 已发送 {ext.upper()} 文件: {os.path.basename(file_path)} ({len(data)} bytes)")
+        except Exception as e:
+            self._reply_json({"event": "file_response", "error": str(e)})
+
+    def _reply_json(self, payload: dict):
+        """通过 WiFi 广播 JSON 响应"""
+        if self.wifi_server.has_connected_client():
+            self.wifi_server.broadcast(json.dumps(payload, ensure_ascii=False))
+        # 同时通过 MQTT 发布
+        event_type = payload.get("event", "reply")
+        self.mqtt_bridge.publish(event_type, payload)
 
     # --------------------------------------------------------------------------
     # 连接状态回调

@@ -18,18 +18,30 @@ from drivers.serial_handler import SerialReader
 from core.location_service import LocationService
 from widgets.map_widget import MapWidget
 from widgets.circle_gauge import CircleGauge
-from widgets.small_data_box import SmallDataBox
+from widgets.metric_card import MetricCard
+from ui.history_page import HistoryPage
+from ui.settings_page import SettingsPage
 from utils.serial_debugger import SerialDebugger
 from drivers.audio import VoicePlayer, LEDController
 from drivers.audio.voice_recorder import ButtonVoiceAssistant
 from llm.ollama_client import OllamaClient, DEFAULT_SYSTEM_PROMPT
-from core.protocol import SensorData, RideSessionState
+from core.protocol import SensorData, RideSessionState, RideSummary
 from services.comm_service import CommService
+from persistence.config_manager import get_config
+from persistence.ride_repository import RideRepository
+from services.ride_service import RideService
+from services.alert_service import AlertService
 
 
 class BikeComputerPro(QWidget):
     def __init__(self):
         super().__init__()
+
+        # ========== 配置管理器初始化 ==========
+        self.config = get_config()
+        print(f"[Main] 配置加载完成，心率上限: {self.config.get('heart_rate_max')}")
+        # =====================================
+
         self.debugger = SerialDebugger(port='/dev/ttyAMA10')
 
         self.base_path = os.path.dirname(os.path.abspath(__file__))
@@ -182,8 +194,13 @@ class BikeComputerPro(QWidget):
                 print(f"[Main] 按钮语音助手初始化失败: {e}")
         # ==================================
 
+        # ========== 骑行记录仓库初始化 ==========
+        self.ride_repo = RideRepository()
+        print("[Main] 骑行记录仓库已初始化")
+        # ==========================================
+
         # ========== 通信服务初始化 ==========
-        self.comm_service = CommService(parent=self)
+        self.comm_service = CommService(parent=self, ride_repo=self.ride_repo)
         self.comm_service.command_received.connect(self.on_app_command)
         def _on_ble_connected(addr: str):
             print(f"[Main] BLE App 已连接: {addr}")
@@ -197,6 +214,24 @@ class BikeComputerPro(QWidget):
         self.comm_service.start()
         print("[Main] 通信服务已启动（BLE + WiFi）")
         # ==================================
+
+        # ========== 骑行服务初始化 ==========
+        self.ride_service = RideService(parent=self, ride_repo=self.ride_repo)
+        self.ride_service.state_changed.connect(self._on_ride_state_changed)
+        self.ride_service.stats_updated.connect(self._on_ride_stats_updated)
+        self.ride_service.ride_started.connect(self._on_ride_started)
+        self.ride_service.ride_stopped.connect(self._on_ride_stopped)
+        self.ride_service.ride_paused.connect(self._on_ride_paused)
+        self.ride_service.ride_resumed.connect(self._on_ride_resumed)
+        print("[Main] 骑行服务已初始化")
+        # ==================================
+
+        # ========== 安全告警服务初始化 ==========
+        self.alert_service = AlertService(parent=self, comm_service=self.comm_service)
+        self.alert_service.alert_triggered.connect(self._on_alert_triggered)
+        self.ride_service.stats_updated.connect(self.alert_service.on_stats_updated)
+        print("[Main] 安全告警服务已初始化")
+        # ======================================
 
         self.current_province = None
 
@@ -229,54 +264,78 @@ class BikeComputerPro(QWidget):
 
         # ==================== 状态栏 ====================
         self.status_bar = QWidget()
-        self.status_bar.setFixedHeight(45)
+        self.status_bar.setFixedHeight(60)
         self.status_layout = QHBoxLayout(self.status_bar)
-        self.status_layout.setContentsMargins(15, 3, 15, 3) 
+        self.status_layout.setContentsMargins(15, 3, 15, 3)
         self.status_layout.setSpacing(0)
 
         # 左侧导航
         self.left_container = QWidget()
         self.left_layout = QHBoxLayout(self.left_container)
         self.left_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_layout.setSpacing(8)
+        self.left_layout.setSpacing(10)
 
         self.active_style = "color: #4DB8FF; background: transparent;"
         self.inactive_style = "color: #666666; background: transparent;"
 
         self.btn_data = QPushButton("数据")
-        self.btn_data.setFont(QFont("Helvetica", 12, QFont.Medium))
+        self.btn_data.setFont(QFont("Helvetica", 13, QFont.Medium))
         self.btn_data.setStyleSheet(self.active_style)
         self.btn_data.clicked.connect(self.show_data_page)
 
         self.v_line = QFrame()
         self.v_line.setFixedWidth(1)
-        self.v_line.setFixedHeight(16)
+        self.v_line.setFixedHeight(24)
         self.v_line.setStyleSheet("background-color: #444444;")
 
         self.btn_map = QPushButton("地图")
-        self.btn_map.setFont(QFont("Helvetica", 12, QFont.Medium))
+        self.btn_map.setFont(QFont("Helvetica", 13, QFont.Medium))
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_map.clicked.connect(self.show_map_page)
 
         self.v_line2 = QFrame()
         self.v_line2.setFixedWidth(1)
-        self.v_line2.setFixedHeight(16)
+        self.v_line2.setFixedHeight(24)
         self.v_line2.setStyleSheet("background-color: #444444;")
 
+        self.btn_history = QPushButton("历史")
+        self.btn_history.setFont(QFont("Helvetica", 13, QFont.Medium))
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_history.clicked.connect(self.show_history_page)
+
+        self.v_line3 = QFrame()
+        self.v_line3.setFixedWidth(1)
+        self.v_line3.setFixedHeight(24)
+        self.v_line3.setStyleSheet("background-color: #444444;")
+
+        self.btn_settings = QPushButton("设置")
+        self.btn_settings.setFont(QFont("Helvetica", 13, QFont.Medium))
+        self.btn_settings.setStyleSheet(self.inactive_style)
+        self.btn_settings.clicked.connect(self.show_settings_page)
+
+        self.v_line4 = QFrame()
+        self.v_line4.setFixedWidth(1)
+        self.v_line4.setFixedHeight(24)
+        self.v_line4.setStyleSheet("background-color: #444444;")
+
         self.btn_exit = QPushButton("退出")
-        self.btn_exit.setFont(QFont("Helvetica", 12, QFont.Medium))
-        self.btn_exit.setStyleSheet("color: #e74c3c; background: transparent;") 
+        self.btn_exit.setFont(QFont("Helvetica", 13, QFont.Medium))
+        self.btn_exit.setStyleSheet("color: #e74c3c; background: transparent;")
         self.btn_exit.clicked.connect(self.safe_exit)
 
         self.left_layout.addWidget(self.btn_data)
         self.left_layout.addWidget(self.v_line)
         self.left_layout.addWidget(self.btn_map)
         self.left_layout.addWidget(self.v_line2)
+        self.left_layout.addWidget(self.btn_history)
+        self.left_layout.addWidget(self.v_line3)
+        self.left_layout.addWidget(self.btn_settings)
+        self.left_layout.addWidget(self.v_line4)
         self.left_layout.addWidget(self.btn_exit)
 
         self.title_label = QLabel("SMART RIDE")
         self.title_label.setStyleSheet("color: #555555; background: transparent;")
-        self.title_label.setFont(QFont("Arial", 11, QFont.Bold))
+        self.title_label.setFont(QFont("Arial", 12, QFont.Bold))
 
         self.right_container = QWidget()
         self.right_layout = QHBoxLayout(self.right_container)
@@ -284,12 +343,12 @@ class BikeComputerPro(QWidget):
         self.right_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.wifi_icon_label = QLabel()
-        self.wifi_icon_label.setFixedSize(32, 18)
+        self.wifi_icon_label.setFixedSize(36, 22)
         self.wifi_icon_label.setStyleSheet("background: transparent; margin-right: 8px;")
 
         self.time_label = QLabel()
         self.time_label.setStyleSheet("color: #FFFFFF; background: transparent;")
-        self.time_label.setFont(QFont("Arial", 15, QFont.Bold))
+        self.time_label.setFont(QFont("Arial", 17, QFont.Bold))
 
         self.right_layout.addWidget(self.wifi_icon_label)
         self.right_layout.addWidget(self.time_label)
@@ -312,22 +371,27 @@ class BikeComputerPro(QWidget):
         # --- 数据页面 ---
         self.page_data = QWidget()
         data_main_layout = QHBoxLayout(self.page_data)
-        data_main_layout.setContentsMargins(12, 8, 12, 4)
-        data_main_layout.setSpacing(15)
+        data_main_layout.setContentsMargins(12, 8, 12, 8)
+        data_main_layout.setSpacing(12)
 
-        # 左侧：圆形仪表盘
+        # 左侧：窄边栏（仪表盘 + 状态 + 控制按钮）
         left_panel = QWidget()
-        left_panel.setFixedWidth(220)
+        left_panel.setFixedWidth(160)
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setSpacing(12)
+        left_layout.setSpacing(10)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setAlignment(Qt.AlignCenter)
+
+        left_layout.addSpacing(64)
 
         self.gauge_speed = CircleGauge("速度", "km/h", 60.0, "#4DB8FF")
+        self.gauge_speed.setFixedSize(145, 145)
         left_layout.addWidget(self.gauge_speed, alignment=Qt.AlignCenter)
 
         self.gauge_power = CircleGauge("功率", "W", 500.0, "#e74c3c")
+        self.gauge_power.setFixedSize(145, 145)
         left_layout.addWidget(self.gauge_power, alignment=Qt.AlignCenter)
+
+        left_layout.addSpacing(16)
 
         self.status_text = QLabel("● 系统正常")
         self.status_text.setStyleSheet("color: #2ecc71; background: transparent;")
@@ -335,34 +399,236 @@ class BikeComputerPro(QWidget):
         self.status_text.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(self.status_text)
 
+        left_layout.addSpacing(20)
+
+        # 骑行控制按钮
+        self.btn_ride_action = QPushButton("开始骑行")
+        self.btn_ride_action.setFont(QFont("Helvetica", 13, QFont.Bold))
+        self.btn_ride_action.setFixedSize(124, 46)
+        self.btn_ride_action.setStyleSheet(
+            "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 8px; }"
+            "QPushButton:pressed { background-color: #27ae60; }"
+        )
+        self.btn_ride_action.clicked.connect(self._on_ride_action_clicked)
+        left_layout.addWidget(self.btn_ride_action, alignment=Qt.AlignCenter)
+
+        self.btn_ride_stop = QPushButton("结束")
+        self.btn_ride_stop.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self.btn_ride_stop.setFixedSize(124, 38)
+        self.btn_ride_stop.setStyleSheet(
+            "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 8px; }"
+            "QPushButton:pressed { background-color: #c0392b; }"
+        )
+        self.btn_ride_stop.clicked.connect(self._on_ride_stop_clicked)
+        self.btn_ride_stop.hide()
+        left_layout.addWidget(self.btn_ride_stop, alignment=Qt.AlignCenter)
+
+        left_layout.addStretch(1)
         data_main_layout.addWidget(left_panel)
 
-        # 右侧：网格数据
+        # 右侧：主内容区
         right_panel = QWidget()
-        right_layout = QGridLayout(right_panel)
-        right_layout.setSpacing(6)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setSpacing(10)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.box_cadence = SmallDataBox("踏频", "rpm", "◉", "#9b59b6")
-        self.box_distance = SmallDataBox("距离", "km", "▶", "#2ecc71")
-        self.box_time = SmallDataBox("时间", "", "◷", "#f39c12")
-        self.box_slope = SmallDataBox("坡度", "%", "▲", "#1abc9c")
-        self.box_temp = SmallDataBox("温度", "°C", "◉", "#3498db")
-        self.box_hr = SmallDataBox("心率", "bpm", "♥", "#e74c3c")
-        self.box_rear = SmallDataBox("后方", "m", "◐", "#e67e22")
+        right_layout.addSpacing(6)
 
-        right_layout.addWidget(self.box_cadence, 0, 0)
-        right_layout.addWidget(self.box_distance, 0, 1)
-        right_layout.addWidget(self.box_time, 0, 2)
-        right_layout.addWidget(self.box_slope, 1, 0)
-        right_layout.addWidget(self.box_temp, 1, 1)
-        right_layout.addWidget(self.box_hr, 1, 2)
-        right_layout.addWidget(self.box_rear, 2, 0, 1, 3)
+        def _make_section_icon(text, color):
+            """标题左侧小图标"""
+            bg = QFrame()
+            bg.setFixedSize(26, 26)
+            bg.setFrameShape(QFrame.NoFrame)
+            bg.setFrameShadow(QFrame.Plain)
+            bg.setLineWidth(0)
+            bg.setMidLineWidth(0)
+            bg.setStyleSheet(f"background-color: {color}22; border-radius: 6px; border: none;")
+            l = QVBoxLayout(bg)
+            l.setContentsMargins(0, 0, 0, 0)
+            l.setSpacing(0)
+            l.setAlignment(Qt.AlignCenter)
+            icon = QLabel(text)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+            f = QFont()
+            f.setPointSize(14)
+            f.setFamilies([
+                "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji",
+                "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Helvetica"
+            ])
+            icon.setFont(f)
+            l.addWidget(icon)
+            return bg
 
-        right_layout.setRowStretch(0, 1)
-        right_layout.setRowStretch(1, 1)
-        right_layout.setRowStretch(2, 1)
+        def _make_section_icon_large(text, color):
+            """标题左侧大图标（供传感器数据使用）"""
+            bg = QFrame()
+            bg.setFixedSize(38, 38)
+            bg.setFrameShape(QFrame.NoFrame)
+            bg.setFrameShadow(QFrame.Plain)
+            bg.setLineWidth(0)
+            bg.setMidLineWidth(0)
+            bg.setStyleSheet(f"background-color: {color}22; border-radius: 10px; border: none;")
+            l = QVBoxLayout(bg)
+            l.setContentsMargins(0, 0, 0, 0)
+            l.setSpacing(0)
+            l.setAlignment(Qt.AlignCenter)
+            icon = QLabel(text)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+            f = QFont()
+            f.setPointSize(18)
+            f.setFamilies([
+                "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji",
+                "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Helvetica"
+            ])
+            icon.setFont(f)
+            l.addWidget(icon)
+            return bg
 
+        # --- 运动数据（大框） ---
+        ride_frame = QFrame()
+        ride_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2A2A2A;
+                border-radius: 12px;
+                border: 1px solid #3A3A4A;
+            }
+        """)
+        ride_section_layout = QVBoxLayout(ride_frame)
+        ride_section_layout.setSpacing(8)
+        ride_section_layout.setContentsMargins(10, 8, 10, 8)
+
+        ride_header_row = QHBoxLayout()
+        ride_header_row.setSpacing(6)
+        ride_header_row.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        ride_header_row.addWidget(_make_section_icon("🏃", "#4DB8FF"))
+        ride_header = QLabel("运动数据")
+        ride_header.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
+        ride_header.setFont(QFont("Helvetica", 12, QFont.Bold))
+        ride_header_row.addWidget(ride_header)
+        ride_header_row.addStretch(1)
+        ride_section_layout.setAlignment(Qt.AlignTop)
+        ride_section_layout.addLayout(ride_header_row)
+
+        ride_metrics = QHBoxLayout()
+        ride_metrics.setSpacing(0)
+        ride_metrics.setContentsMargins(0, 0, 0, 0)
+
+        def _make_ride_metric(icon, title, color, font_size=28, default_text="--", unit=""):
+            w = QWidget()
+            w.setStyleSheet("background: transparent; border: none;")
+            vl = QVBoxLayout(w)
+            vl.setSpacing(4)
+            vl.setContentsMargins(0, 0, 0, 0)
+            vl.setAlignment(Qt.AlignCenter)
+
+            ic = QLabel(icon)
+            ic.setAlignment(Qt.AlignCenter)
+            ic.setStyleSheet(f"color: {color}; background: transparent;")
+            f = QFont()
+            f.setPointSize(16)
+            f.setFamilies([
+                "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji",
+                "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Helvetica"
+            ])
+            ic.setFont(f)
+            vl.addWidget(ic, alignment=Qt.AlignCenter)
+            vl.addSpacing(8)
+
+            # 数值 + 单位容器
+            val_container = QWidget()
+            val_container.setStyleSheet("background: transparent; border: none;")
+            val_layout = QHBoxLayout(val_container)
+            val_layout.setSpacing(4)
+            val_layout.setContentsMargins(0, 0, 0, 0)
+            val_layout.setAlignment(Qt.AlignCenter)
+
+            val = QLabel(default_text)
+            val.setAlignment(Qt.AlignCenter)
+            val.setStyleSheet("color: #FFFFFF; background: transparent; border: none;")
+            val.setFont(QFont("Arial", font_size, QFont.Bold))
+
+            unit_lbl = QLabel(unit)
+            unit_lbl.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+            unit_lbl.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
+            unit_lbl.setFont(QFont("Helvetica", 10))
+
+            val_layout.addWidget(val, alignment=Qt.AlignVCenter)
+            val_layout.addWidget(unit_lbl, alignment=Qt.AlignLeft | Qt.AlignBottom)
+
+            vl.addWidget(val_container, alignment=Qt.AlignCenter)
+
+            t = QLabel(title)
+            t.setAlignment(Qt.AlignCenter)
+            t.setStyleSheet("color: #888888; background: transparent;")
+            t.setFont(QFont("Helvetica", 10))
+            vl.addWidget(t, alignment=Qt.AlignCenter)
+            return w, val, unit_lbl
+
+        self.ride_time_widget, self.ride_time_val, _ = _make_ride_metric("⏱️", "骑行时长", "#4DB8FF", 32, default_text="00:00:00")
+        self.ride_dist_widget, self.ride_dist_val, self.ride_dist_unit = _make_ride_metric("📏", "骑行距离", "#2ecc71", 24, default_text="0", unit="m")
+        self.ride_speed_widget, self.ride_speed_val, _ = _make_ride_metric("🚀", "平均速度", "#9b59b6", 24, default_text="0.0", unit="km/h")
+
+        ride_metrics.addWidget(self.ride_time_widget, 1)
+
+        line1 = QFrame()
+        line1.setFixedWidth(1)
+        line1.setStyleSheet("background-color: #555555;")
+        ride_metrics.addWidget(line1)
+
+        ride_metrics.addWidget(self.ride_dist_widget, 1)
+
+        line2 = QFrame()
+        line2.setFixedWidth(1)
+        line2.setStyleSheet("background-color: #555555;")
+        ride_metrics.addWidget(line2)
+
+        ride_metrics.addWidget(self.ride_speed_widget, 1)
+        ride_section_layout.addLayout(ride_metrics)
+        right_layout.addWidget(ride_frame, 1)
+
+        # --- 传感器数据（大框） ---
+        sensor_frame = QFrame()
+        sensor_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2A2A2A;
+                border-radius: 12px;
+                border: 1px solid #3A3A4A;
+            }
+        """)
+        sensor_section_layout = QVBoxLayout(sensor_frame)
+        sensor_section_layout.setSpacing(6)
+        sensor_section_layout.setContentsMargins(10, 6, 10, 6)
+
+        sensor_header_row = QHBoxLayout()
+        sensor_header_row.setSpacing(6)
+        sensor_header_row.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        sensor_header_row.addWidget(_make_section_icon_large("📡", "#00bcd4"))
+        sensor_header = QLabel("传感器数据")
+        sensor_header.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
+        sensor_header.setFont(QFont("Helvetica", 14, QFont.Bold))
+        sensor_header_row.addWidget(sensor_header)
+        sensor_header_row.addStretch(1)
+        sensor_section_layout.setAlignment(Qt.AlignTop)
+        sensor_section_layout.addLayout(sensor_header_row)
+
+        sensor_cards = QHBoxLayout()
+        sensor_cards.setSpacing(8)
+
+        self.card_cadence = MetricCard("踏频", "🔧", "#9b59b6", unit="rpm")
+        self.card_slope = MetricCard("坡度", "📐", "#e67e22", unit="%")
+        self.card_temp = MetricCard("温度", "🌡️", "#00bcd4", unit="°C")
+        self.card_hr = MetricCard("心率", "❤️", "#e74c3c", unit="bpm")
+        self.card_rear = MetricCard("后方来车", "🚗", "#2ecc71", unit="m")
+
+        sensor_cards.addWidget(self.card_cadence, 1)
+        sensor_cards.addWidget(self.card_slope, 1)
+        sensor_cards.addWidget(self.card_temp, 1)
+        sensor_cards.addWidget(self.card_hr, 1)
+        sensor_cards.addWidget(self.card_rear, 1)
+        sensor_section_layout.addLayout(sensor_cards, 1)
+        right_layout.addWidget(sensor_frame, 2)
         data_main_layout.addWidget(right_panel, 1)
 
         # 地图页面（使用高德在线地图组件）
@@ -384,48 +650,58 @@ class BikeComputerPro(QWidget):
         nav_handler.nav_stopped.connect(self.on_nav_stopped)
         nav_handler.nav_instruction.connect(self.on_nav_instruction_v2)
         
+        # --- 历史记录页面 ---
+        self.page_history = HistoryPage(ride_repo=self.ride_repo, parent=self)
+        self.page_history.ride_selected.connect(self._on_history_ride_selected)
+
+        # --- 设置页面 ---
+        self.page_settings = SettingsPage(config=self.config, parent=self)
+        self.page_settings.config_saved.connect(self._on_config_saved)
+
         self.stacked_widget = QStackedWidget()
+        self.stacked_widget.setMinimumHeight(0)
         self.stacked_widget.addWidget(self.page_data)
         self.stacked_widget.addWidget(self.page_map)
+        self.stacked_widget.addWidget(self.page_history)
+        self.stacked_widget.addWidget(self.page_settings)
 
         # --- 消息框 ---
         self.dialog_container = QWidget()
         self.dialog_container.setMinimumHeight(110)
-        self.dialog_container.setMaximumHeight(250)  # 增加最大高度以显示更多内容
+        self.dialog_container.setMaximumHeight(250)
         self.dialog_container.setStyleSheet("background: transparent;")
-        
+
         dialog_layout = QVBoxLayout(self.dialog_container)
-        dialog_layout.setContentsMargins(15, 3, 15, 5)
+        dialog_layout.setContentsMargins(15, 3, 15, 3)
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
         self.dialog_box.setMinimumHeight(95)
-        self.dialog_box.setMaximumHeight(220)  # 增加最大高度以显示多行
+        self.dialog_box.setMaximumHeight(220)
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
-                border-radius: 14px;
+                border-radius: 10px;
                 border: 1px solid #4A4A4A;
             }
         """)
-        box_layout = QVBoxLayout(self.dialog_box)  # 改为垂直布局
+        box_layout = QVBoxLayout(self.dialog_box)
         box_layout.setContentsMargins(15, 10, 15, 10)
         box_layout.setSpacing(5)
-        
+
         self.dialog_msg = QLabel("🤖 欢迎使用 SMART RIDE 智能助理...")
-        self.dialog_msg.setFont(QFont("Helvetica", 13))
+        self.dialog_msg.setFont(QFont("Helvetica", 12))
         self.dialog_msg.setStyleSheet("color: #CCCCCC; background: transparent;")
-        self.dialog_msg.setWordWrap(True)  # 启用自动换行
-        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)  # 左对齐，顶部对齐
-        self.dialog_msg.setTextFormat(Qt.PlainText)  # 纯文本模式，保留换行符
-        # 设置尺寸策略，允许垂直扩展
+        self.dialog_msg.setWordWrap(True)
+        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.dialog_msg.setTextFormat(Qt.PlainText)
         self.dialog_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         box_layout.addWidget(self.dialog_msg)
-        
+
         # 语音消息历史（最多显示最近2条，避免超出界面）
         self.voice_messages = []
         self.max_voice_messages = 2
-        
+
         dialog_layout.addWidget(self.dialog_box)
 
         # 组装
@@ -609,11 +885,37 @@ class BikeComputerPro(QWidget):
         self.stacked_widget.setCurrentIndex(0)
         self.btn_data.setStyleSheet(self.active_style)
         self.btn_map.setStyleSheet(self.inactive_style)
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_settings.setStyleSheet(self.inactive_style)
+        self.page_map.clear_track()
 
     def show_map_page(self):
         self.stacked_widget.setCurrentIndex(1)
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.active_style)
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_settings.setStyleSheet(self.inactive_style)
+
+    def show_history_page(self):
+        self.stacked_widget.setCurrentIndex(2)
+        self.btn_data.setStyleSheet(self.inactive_style)
+        self.btn_map.setStyleSheet(self.inactive_style)
+        self.btn_history.setStyleSheet(self.active_style)
+        self.btn_settings.setStyleSheet(self.inactive_style)
+        self.page_map.clear_track()
+        self.page_history.refresh_list()
+
+    def show_settings_page(self):
+        self.stacked_widget.setCurrentIndex(3)
+        self.btn_data.setStyleSheet(self.inactive_style)
+        self.btn_map.setStyleSheet(self.inactive_style)
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_settings.setStyleSheet(self.active_style)
+        self.page_map.clear_track()
+
+    def _on_config_saved(self):
+        print("[Main] 配置已更新并保存")
+        self.add_voice_message("设置已保存", icon="⚙️")
 
     def safe_exit(self):
         print("退出程序...")
@@ -655,55 +957,54 @@ class BikeComputerPro(QWidget):
             get_data_context().update_from_sensor(sensor)
             # 推送到通信服务（由 CommService 决定何时发给 App）
             self.comm_service.on_sensor_data(sensor)
+            # 推送到骑行服务
+            print(f"[Main] 推送 sensor 到 RideService, state={self.ride_service.state.value}, speed={sensor.speed}")
+            self.ride_service.on_sensor_data(sensor)
+            # 推送到告警服务
+            self.alert_service.on_sensor_data(sensor, self.ride_service.state)
+            print(f"[Main] RideService 返回, distance={self.ride_service.summary.total_distance:.4f}")
         except Exception as e:
             print(f"[DataContext] 更新失败: {e}")
+            import traceback
+            traceback.print_exc()
 
         # 更新数据卡片
         if "speed" in data:
             val = float(data["speed"])
             self.gauge_speed.set_value(val)
-            
+
         if "power" in data:
             val = int(data["power"])
             self.gauge_power.set_value(val)
-            
+
         if "cadence" in data:
-            self.box_cadence.update_value(int(data["cadence"]))
-            
-        if "distance" in data:
-            self.box_distance.update_value(f"{float(data['distance']):.1f}")
-            
-        if "ride_time" in data:
-            seconds = int(data["ride_time"])
-            hours = seconds // 3600
-            minutes = (seconds % 3600) // 60
-            self.box_time.update_value(f"{hours:02d}:{minutes:02d}")
-            
+            self.card_cadence.update_value(int(data["cadence"]))
+
         if "slope" in data:
             val = float(data["slope"])
             prefix = "+" if val > 0 else ""
             color = "#e74c3c" if abs(val) > 10 else "#2ecc71" if val > 0 else "#FFFFFF"
-            self.box_slope.update_value(f"{prefix}{val:.1f}", color)
-            
+            self.card_slope.update_value(f"{prefix}{val:.1f}", color)
+
         if "posture" in data:
             val = int(data["posture"])
             if val != 0:
-                self.box_slope.update_value("姿态异常", "#e74c3c")
-            
+                self.card_slope.update_value("姿态异常", "#e74c3c")
+
         if "temperature" in data:
             val = float(data["temperature"])
-            color = "#e74c3c" if val > 35 else "#3498db" if val < 10 else "#FFFFFF"
-            self.box_temp.update_value(f"{val:.1f}", color)
-            
+            color = "#e74c3c" if val > 35 else "#00bcd4" if val < 10 else "#FFFFFF"
+            self.card_temp.update_value(f"{val:.1f}", color)
+
         if "heart_rate" in data:
             val = int(data["heart_rate"])
             color = "#e74c3c" if val > 180 else "#f39c12" if val > 160 else "#FFFFFF"
-            self.box_hr.update_value(val, color)
-            
+            self.card_hr.update_value(val, color)
+
         if "rear_dist" in data:
             val = float(data["rear_dist"])
             color = "#e74c3c" if val < 5 else "#f39c12" if val < 10 else "#2ecc71"
-            self.box_rear.update_value(f"{val:.1f}", color)
+            self.card_rear.update_value(f"{val:.1f}", color)
             
         if "err_code" in data:
             err = int(data["err_code"])
@@ -853,16 +1154,25 @@ class BikeComputerPro(QWidget):
     def on_nav_instruction(self, instruction):
         """导航指令回调（旧版，用于兼容）"""
         print(f"导航指令: {instruction}")
-        
+
         # 添加到语音消息框
         self.add_voice_message(instruction, icon="🧭")
-        
+
         # 语音播报导航指令
         if self.voice_player:
             try:
                 self.voice_player.speak(instruction)
             except Exception as e:
                 print(f"[Voice] 导航语音播报失败: {e}")
+
+    def _on_history_ride_selected(self, ride_id: str, track_points: list):
+        """历史记录被选中：加载轨迹并切换到地图页"""
+        print(f"[Main] 选中历史记录: {ride_id}, 轨迹点数: {len(track_points)}")
+        # 先切换到地图页，确保地图可见后再加载轨迹，否则 setFitView 比例尺不对
+        self.show_map_page()
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(300, lambda: self.page_map.load_history_track(track_points))
+        self.add_voice_message(f"已加载历史轨迹，共 {len(track_points)} 个轨迹点", icon="🗺️")
 
     def add_voice_message(self, text: str, icon: str = "🔊"):
         """
@@ -975,31 +1285,22 @@ class BikeComputerPro(QWidget):
         """处理 App 发来的命令"""
         from core.protocol import AppCommandType
         print(f"[Main] 执行 App 命令: {cmd.cmd_type.value}")
-        
+
         if cmd.cmd_type == AppCommandType.START_RIDE:
-            self.comm_service.set_ride_state(RideSessionState.RIDING)
-            self.add_voice_message("骑行开始", icon="🚴")
-            if self.voice_player:
-                self.voice_player.speak("骑行开始")
-                
+            self.ride_service.start_ride()
+
         elif cmd.cmd_type == AppCommandType.PAUSE_RIDE:
-            self.comm_service.set_ride_state(RideSessionState.PAUSED)
-            self.add_voice_message("骑行暂停", icon="⏸")
-            
+            self.ride_service.pause_ride()
+
         elif cmd.cmd_type == AppCommandType.RESUME_RIDE:
-            self.comm_service.set_ride_state(RideSessionState.RIDING)
-            self.add_voice_message("骑行继续", icon="▶")
-            
+            self.ride_service.resume_ride()
+
         elif cmd.cmd_type == AppCommandType.STOP_RIDE:
-            self.comm_service.set_ride_state(RideSessionState.FINISHED)
-            self.add_voice_message("骑行结束", icon="🏁")
-            if self.voice_player:
-                self.voice_player.speak("骑行结束")
-                
+            self.ride_service.stop_ride()
+
         elif cmd.cmd_type == AppCommandType.PING:
-            # 心跳响应，CommService 会自动保持连接
             pass
-            
+
         else:
             print(f"[Main] 未处理的命令: {cmd.cmd_type.value}")
 
@@ -1010,13 +1311,124 @@ class BikeComputerPro(QWidget):
             self.add_voice_message(msg, icon="⚠️")
             if self.voice_player:
                 level = payload.get("level", "warning")
-                # critical 级别用红灯闪烁，warning 用黄灯
-                if self.led_controller and level == "critical":
-                    self.led_controller.start_pattern("flash", LEDController.COLOR_RED)
                 self.voice_player.speak(msg)
 
+    def _on_alert_triggered(self, alert_type: str, message: str, level: str):
+        """处理 AlertService 触发的告警"""
+        # UI 消息
+        self.add_voice_message(message, icon="⚠️")
+
+        # 语音播报
+        if self.voice_player:
+            self.voice_player.speak(message)
+
+        # LED 闪灯：critical 红灯闪烁，warning 黄灯闪烁，其他蓝灯闪烁
+        if self.led_controller:
+            if level == "critical":
+                self.led_controller.start_pattern("blink", LEDController.COLOR_RED)
+            elif level == "warning":
+                self.led_controller.start_pattern("blink", LEDController.COLOR_YELLOW)
+            else:
+                self.led_controller.start_pattern("blink", LEDController.COLOR_BLUE)
+
+            # 3 秒后恢复绿色常亮（正常骑行状态指示灯）
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(3000, lambda: (
+                self.led_controller.stop_pattern(),
+                self.led_controller.set_all(LEDController.COLOR_GREEN)
+            ))
+
+    # --------------------------------------------------------------------------
+    # 骑行服务回调
+    # --------------------------------------------------------------------------
+
+    def _on_ride_action_clicked(self):
+        state = self.ride_service.get_state()
+        if state == RideSessionState.IDLE or state == RideSessionState.FINISHED:
+            self.ride_service.start_ride()
+        elif state == RideSessionState.RIDING:
+            self.ride_service.pause_ride()
+        elif state == RideSessionState.PAUSED:
+            self.ride_service.resume_ride()
+
+    def _on_ride_stop_clicked(self):
+        self.ride_service.stop_ride()
+
+    def _on_ride_state_changed(self, state: str):
+        self.comm_service.set_ride_state(RideSessionState(state))
+        if state == "riding":
+            self.btn_ride_action.setText("暂停")
+            self.btn_ride_action.setStyleSheet(
+                "QPushButton { background-color: #f39c12; color: #FFFFFF; border-radius: 8px; }"
+                "QPushButton:pressed { background-color: #d35400; }"
+            )
+            self.btn_ride_stop.show()
+        elif state == "paused":
+            self.btn_ride_action.setText("继续")
+            self.btn_ride_action.setStyleSheet(
+                "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 8px; }"
+                "QPushButton:pressed { background-color: #27ae60; }"
+            )
+            self.btn_ride_stop.show()
+        elif state == "idle" or state == "finished":
+            self.btn_ride_action.setText("开始骑行")
+            self.btn_ride_action.setStyleSheet(
+                "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 8px; }"
+                "QPushButton:pressed { background-color: #27ae60; }"
+            )
+            self.btn_ride_stop.hide()
+            # 结束后清空统计显示
+            if state == "idle":
+                self.ride_time_val.setText("00:00:00")
+                self.ride_dist_val.setText("0")
+                self.ride_dist_unit.setText("m")
+                self.ride_speed_val.setText("0.0")
+
+    def _on_ride_stats_updated(self, summary: RideSummary):
+        mt = int(summary.moving_time)
+        h = mt // 3600
+        m = (mt % 3600) // 60
+        s = mt % 60
+        self.ride_time_val.setText(f"{h:02d}:{m:02d}:{s:02d}")
+
+        # 骑行距离：小于 1km 用米，大于等于 1km 用 km
+        if summary.total_distance < 1.0:
+            self.ride_dist_val.setText(str(int(summary.total_distance * 1000)))
+            self.ride_dist_unit.setText("m")
+        else:
+            self.ride_dist_val.setText(f"{summary.total_distance:.2f}")
+            self.ride_dist_unit.setText("km")
+
+        self.ride_speed_val.setText(f"{summary.avg_speed:.1f}")
+
+    def _on_ride_started(self, summary: RideSummary):
+        self.add_voice_message("骑行开始", icon="🚴")
+        if self.voice_player:
+            self.voice_player.speak("骑行开始")
+        if self.alert_service:
+            self.alert_service.reset()
+
+    def _on_ride_paused(self):
+        self.add_voice_message("骑行暂停", icon="⏸")
+        if self.voice_player:
+            self.voice_player.speak("骑行暂停")
+
+    def _on_ride_resumed(self):
+        self.add_voice_message("骑行继续", icon="▶")
+        if self.voice_player:
+            self.voice_player.speak("骑行继续")
+
+    def _on_ride_stopped(self, summary: RideSummary):
+        self.add_voice_message("骑行结束", icon="🏁")
+        if self.voice_player:
+            self.voice_player.speak("骑行结束")
+        # 最终统计刷新一次
+        self._on_ride_stats_updated(summary)
+        if self.alert_service:
+            self.alert_service.reset()
+
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape: 
+        if event.key() == Qt.Key_Escape:
             self.safe_exit()
 
 
