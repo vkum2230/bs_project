@@ -342,6 +342,14 @@ class BikeComputerPro(QWidget):
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
+        self.zt_status_label = QLabel("正常骑行")
+        self.zt_status_label.setStyleSheet("color: #2ecc71; background: transparent; margin-right: 10px;")
+        self.zt_status_label.setFont(QFont("Helvetica", 12, QFont.Bold))
+
+        self.heading_label = QLabel("")
+        self.heading_label.setStyleSheet("color: #4DB8FF; background: transparent; margin-right: 10px;")
+        self.heading_label.setFont(QFont("Helvetica", 11, QFont.Bold))
+
         self.wifi_icon_label = QLabel()
         self.wifi_icon_label.setFixedSize(36, 22)
         self.wifi_icon_label.setStyleSheet("background: transparent; margin-right: 8px;")
@@ -350,6 +358,8 @@ class BikeComputerPro(QWidget):
         self.time_label.setStyleSheet("color: #FFFFFF; background: transparent;")
         self.time_label.setFont(QFont("Arial", 17, QFont.Bold))
 
+        self.right_layout.addWidget(self.zt_status_label)
+        self.right_layout.addWidget(self.heading_label)
         self.right_layout.addWidget(self.wifi_icon_label)
         self.right_layout.addWidget(self.time_label)
 
@@ -376,22 +386,22 @@ class BikeComputerPro(QWidget):
 
         # 左侧：窄边栏（仪表盘 + 状态 + 控制按钮）
         left_panel = QWidget()
-        left_panel.setFixedWidth(160)
+        left_panel.setFixedWidth(170)
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setSpacing(10)
+        left_layout.setSpacing(8)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        left_layout.addSpacing(64)
+        left_layout.addSpacing(10)
 
         self.gauge_speed = CircleGauge("速度", "km/h", 60.0, "#4DB8FF")
-        self.gauge_speed.setFixedSize(145, 145)
+        self.gauge_speed.setFixedSize(115, 115)
         left_layout.addWidget(self.gauge_speed, alignment=Qt.AlignCenter)
 
         self.gauge_power = CircleGauge("功率", "W", 500.0, "#e74c3c")
-        self.gauge_power.setFixedSize(145, 145)
+        self.gauge_power.setFixedSize(115, 115)
         left_layout.addWidget(self.gauge_power, alignment=Qt.AlignCenter)
 
-        left_layout.addSpacing(16)
+        left_layout.addSpacing(4)
 
         self.status_text = QLabel("● 系统正常")
         self.status_text.setStyleSheet("color: #2ecc71; background: transparent;")
@@ -399,12 +409,12 @@ class BikeComputerPro(QWidget):
         self.status_text.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(self.status_text)
 
-        left_layout.addSpacing(20)
+        left_layout.addSpacing(6)
 
         # 骑行控制按钮
         self.btn_ride_action = QPushButton("开始骑行")
-        self.btn_ride_action.setFont(QFont("Helvetica", 13, QFont.Bold))
-        self.btn_ride_action.setFixedSize(124, 46)
+        self.btn_ride_action.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self.btn_ride_action.setFixedSize(116, 40)
         self.btn_ride_action.setStyleSheet(
             "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 8px; }"
             "QPushButton:pressed { background-color: #27ae60; }"
@@ -413,8 +423,8 @@ class BikeComputerPro(QWidget):
         left_layout.addWidget(self.btn_ride_action, alignment=Qt.AlignCenter)
 
         self.btn_ride_stop = QPushButton("结束")
-        self.btn_ride_stop.setFont(QFont("Helvetica", 12, QFont.Bold))
-        self.btn_ride_stop.setFixedSize(124, 38)
+        self.btn_ride_stop.setFont(QFont("Helvetica", 11, QFont.Bold))
+        self.btn_ride_stop.setFixedSize(116, 34)
         self.btn_ride_stop.setStyleSheet(
             "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 8px; }"
             "QPushButton:pressed { background-color: #c0392b; }"
@@ -667,17 +677,15 @@ class BikeComputerPro(QWidget):
 
         # --- 消息框 ---
         self.dialog_container = QWidget()
-        self.dialog_container.setMinimumHeight(110)
-        self.dialog_container.setMaximumHeight(250)
+        self.dialog_container.setFixedHeight(145)
         self.dialog_container.setStyleSheet("background: transparent;")
 
         dialog_layout = QVBoxLayout(self.dialog_container)
-        dialog_layout.setContentsMargins(15, 3, 15, 3)
+        dialog_layout.setContentsMargins(10, 4, 10, 4)
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
-        self.dialog_box.setMinimumHeight(95)
-        self.dialog_box.setMaximumHeight(220)
+        self.dialog_box.setFixedHeight(120)
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -686,8 +694,8 @@ class BikeComputerPro(QWidget):
             }
         """)
         box_layout = QVBoxLayout(self.dialog_box)
-        box_layout.setContentsMargins(15, 10, 15, 10)
-        box_layout.setSpacing(5)
+        box_layout.setContentsMargins(10, 6, 10, 6)
+        box_layout.setSpacing(2)
 
         self.dialog_msg = QLabel("🤖 欢迎使用 SMART RIDE 智能助理...")
         self.dialog_msg.setFont(QFont("Helvetica", 12))
@@ -700,7 +708,7 @@ class BikeComputerPro(QWidget):
 
         # 语音消息历史（最多显示最近2条，避免超出界面）
         self.voice_messages = []
-        self.max_voice_messages = 2
+        self.max_voice_messages = 3
 
         dialog_layout.addWidget(self.dialog_box)
 
@@ -946,6 +954,50 @@ class BikeComputerPro(QWidget):
                 pass
         self.close()
 
+    @staticmethod
+    def yaw_to_direction(yaw: float) -> str:
+        """将 IMU 航偏角（0°正北，顺时针增加）转换为中文方向描述，精确到每一度。"""
+        angle = yaw % 360.0
+        # 四舍五入到整数度
+        a = int(round(angle))
+        if a >= 360:
+            a = 0
+
+        if a == 0:
+            return "正北"
+        if a == 90:
+            return "正东"
+        if a == 180:
+            return "正南"
+        if a == 270:
+            return "正西"
+        if a == 45:
+            return "东北"
+        if a == 135:
+            return "东南"
+        if a == 225:
+            return "西南"
+        if a == 315:
+            return "西北"
+
+        if 0 < a < 45:
+            return f"北偏东{a}度"
+        if 45 < a < 90:
+            return f"东偏北{90 - a}度"
+        if 90 < a < 135:
+            return f"东偏南{a - 90}度"
+        if 135 < a < 180:
+            return f"南偏东{180 - a}度"
+        if 180 < a < 225:
+            return f"南偏西{a - 180}度"
+        if 225 < a < 270:
+            return f"西偏南{270 - a}度"
+        if 270 < a < 315:
+            return f"西偏北{a - 270}度"
+        if 315 < a < 360:
+            return f"北偏西{360 - a}度"
+        return "未知方向"
+
     def on_data_received(self, data):
         formatted_data = json.dumps(data, indent=2, ensure_ascii=False)
         print(formatted_data)
@@ -986,11 +1038,6 @@ class BikeComputerPro(QWidget):
             color = "#e74c3c" if abs(val) > 10 else "#2ecc71" if val > 0 else "#FFFFFF"
             self.card_slope.update_value(f"{prefix}{val:.1f}", color)
 
-        if "posture" in data:
-            val = int(data["posture"])
-            if val != 0:
-                self.card_slope.update_value("姿态异常", "#e74c3c")
-
         if "temperature" in data:
             val = float(data["temperature"])
             color = "#e74c3c" if val > 35 else "#00bcd4" if val < 10 else "#FFFFFF"
@@ -1006,6 +1053,25 @@ class BikeComputerPro(QWidget):
             color = "#e74c3c" if val < 5 else "#f39c12" if val < 10 else "#2ecc71"
             self.card_rear.update_value(f"{val:.1f}", color)
             
+        if "zt_flag" in data:
+            zt = int(data["zt_flag"])
+            zt_map = {
+                0: ("跌倒", "#e74c3c"),
+                1: ("向右转弯", "#f39c12"),
+                2: ("向左转弯", "#f39c12"),
+                3: ("上坡", "#3498db"),
+                4: ("下坡", "#3498db"),
+                5: ("正常骑行", "#2ecc71"),
+            }
+            text, color = zt_map.get(zt, (f"状态 {zt}", "#FFFFFF"))
+            self.zt_status_label.setText(text)
+            self.zt_status_label.setStyleSheet(f"color: {color}; background: transparent; margin-right: 10px;")
+
+        if "yaw" in data:
+            yaw_val = float(data["yaw"])
+            self.page_map.update_yaw(yaw_val)
+            self.heading_label.setText(self.yaw_to_direction(yaw_val))
+
         if "err_code" in data:
             err = int(data["err_code"])
             if err == 0:
@@ -1185,7 +1251,7 @@ class BikeComputerPro(QWidget):
                 - __STREAM_FINAL__: 流式完成（同一行显示最终结果）
         """
         # 限制单条消息长度，防止超出界面
-        max_length = 120
+        max_length = 500
         cleaned_text = text.replace('\n', ' ').replace('\r', ' ').strip()
         if len(cleaned_text) > max_length:
             cleaned_text = cleaned_text[:max_length] + "..."
@@ -1404,24 +1470,24 @@ class BikeComputerPro(QWidget):
     def _on_ride_started(self, summary: RideSummary):
         self.add_voice_message("骑行开始", icon="🚴")
         if self.voice_player:
-            self.voice_player.speak("骑行开始")
+            self.voice_player.speak("骑行开始", show_in_ui=False)
         if self.alert_service:
             self.alert_service.reset()
 
     def _on_ride_paused(self):
         self.add_voice_message("骑行暂停", icon="⏸")
         if self.voice_player:
-            self.voice_player.speak("骑行暂停")
+            self.voice_player.speak("骑行暂停", show_in_ui=False)
 
     def _on_ride_resumed(self):
         self.add_voice_message("骑行继续", icon="▶")
         if self.voice_player:
-            self.voice_player.speak("骑行继续")
+            self.voice_player.speak("骑行继续", show_in_ui=False)
 
     def _on_ride_stopped(self, summary: RideSummary):
         self.add_voice_message("骑行结束", icon="🏁")
         if self.voice_player:
-            self.voice_player.speak("骑行结束")
+            self.voice_player.speak("骑行结束", show_in_ui=False)
         # 最终统计刷新一次
         self._on_ride_stats_updated(summary)
         if self.alert_service:

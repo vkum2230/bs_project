@@ -97,7 +97,8 @@ class SensorData:
     distance: float = 0.0        # 距离 km
     ride_time: int = 0           # 骑行时间秒
     slope: float = 0.0           # 坡度 %
-    posture: int = 0             # 骑行姿态（0=正常，1=异常）
+    zt_flag: int = 5             # 骑行状态标志（0跌倒 1右转弯 2左转弯 3上坡 4下坡 5正常骑行）
+    yaw: float = 0.0             # IMU 航偏角，0°指北，顺时针增加
     temperature: float = 0.0     # 温度 °C
     heart_rate: float = 0.0      # 心率 bpm
     rear_dist: float = 0.0       # 后方距离 m
@@ -117,7 +118,8 @@ class SensorData:
             distance=float(raw.get("distance", 0.0)),
             ride_time=int(raw.get("ride_time", 0)),
             slope=float(raw.get("slope", 0.0)),
-            posture=int(raw.get("posture", 0)),
+            zt_flag=int(raw.get("zt_flag", 5)),
+            yaw=float(raw.get("yaw", 0.0)),
             temperature=float(raw.get("temperature", 0.0)),
             heart_rate=float(raw.get("heart_rate", 0.0)),
             rear_dist=float(raw.get("rear_dist", 0.0)),
@@ -134,7 +136,8 @@ class SensorData:
             "distance": self.distance,
             "ride_time": self.ride_time,
             "slope": self.slope,
-            "posture": self.posture,
+            "zt_flag": self.zt_flag,
+            "yaw": self.yaw,
             "temperature": self.temperature,
             "heart_rate": self.heart_rate,
             "rear_dist": self.rear_dist,

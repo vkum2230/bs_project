@@ -24,6 +24,7 @@ class ConfigManager:
         "heart_rate_min": 50,
         "age": 30,
         "weight_kg": 70,
+        "rear_dist_alert_m": 5.0,
         "unit_system": "metric",  # metric / imperial
         "auto_start_ride": False,
         "ble_whitelist": [],
@@ -33,6 +34,9 @@ class ConfigManager:
             "fatigue": True,
             "fall": True,
         },
+        "aliyun_tts_api_key": "sk-c6ec991c7d9d4fba8c95803fe55b47e6",
+        "aliyun_tts_voice": "Maia",
+        "aliyun_tts_model": "qwen3-tts-flash",
     }
 
     def __new__(cls) -> "ConfigManager":

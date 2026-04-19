@@ -27,8 +27,8 @@ class OllamaClient:
         self.host = host
         self.api_url = f"{host}/api/generate"
         
-    def chat(self, prompt: str, system_prompt: str = None, 
-             max_tokens: int = 256) -> str:
+    def chat(self, prompt: str, system_prompt: str = None,
+             max_tokens: int = 128) -> str:
         """
         发送对话请求（极速模式）
         
@@ -52,7 +52,7 @@ class OllamaClient:
                     "top_k": 20,  # 减少候选
                     "top_p": 0.8,
                     "repeat_penalty": 1.2,
-                    "num_ctx": 1024,  # 减少上下文
+                    "num_ctx": 4096,  # 足够上下文，避免截断
                 }
             }
             
@@ -64,7 +64,7 @@ class OllamaClient:
             response = requests.post(
                 self.api_url,
                 json=data,
-                timeout=30  # 30秒超时，树莓派需要更长时间
+                timeout=60  # 60秒超时，树莓派需要更长时间
             )
             
             if response.status_code == 200:
@@ -104,11 +104,11 @@ class OllamaClient:
         thread.daemon = True
         thread.start()
     
-    def chat_stream(self, prompt: str, 
+    def chat_stream(self, prompt: str,
                     on_token: Callable[[str], None],
                     on_complete: Callable[[str], None],
                     system_prompt: str = None,
-                    max_tokens: int = 256):
+                    max_tokens: int = 128):
         """
         流式对话（边生成边返回，更快响应）
         
@@ -133,7 +133,7 @@ class OllamaClient:
                         "top_k": 40,
                         "top_p": 0.9,
                         "repeat_penalty": 1.1,
-                        "num_ctx": 512,  # 进一步减小上下文
+                        "num_ctx": 4096,  # 足够上下文，避免截断
                         "num_batch": 256,  # 批处理大小
                         "num_thread": 4,  # 使用多线程
                     }
@@ -151,7 +151,7 @@ class OllamaClient:
                     self.api_url,
                     json=data,
                     stream=True,
-                    timeout=60  # 60秒超时，长文本需要更多时间
+                    timeout=120  # 120秒超时，树莓派生成长文本较慢
                 )
                 print(f"[OllamaClient] 收到响应，状态码: {response.status_code}")
                 
@@ -192,7 +192,7 @@ class OllamaClient:
                 on_complete(full_response.strip())
                 
             except requests.exceptions.Timeout:
-                print("[OllamaClient] 流式请求超时（60秒）")
+                print("[OllamaClient] 流式请求超时（120秒）")
                 print(f"[OllamaClient] 已生成内容长度: {len(full_response)} 字符")
                 # 超时但已经有内容，返回已生成的内容
                 if full_response.strip():
@@ -219,7 +219,9 @@ class OllamaClient:
 # 默认系统提示词（骑行助手角色）
 DEFAULT_SYSTEM_PROMPT = """你是骑行助手小智，一个专业的骑行导航助手。
 你可以回答关于骑行路线、路况、天气、骑行技巧等问题。
-回答要简洁明了，适合在骑行过程中听取。"""
+回答要简洁明了，适合在骑行过程中听取。
+直接回答用户问题，不要反问用户，不要生成未完成的句子。
+每次回复严格控制在100字以内，务必完整收尾，绝不截断。"""
 
 
 if __name__ == "__main__":

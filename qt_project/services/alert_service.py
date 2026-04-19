@@ -45,15 +45,15 @@ class AlertService(QObject):
         """每次收到 STM32 传感器数据时调用"""
         now = time.time()
 
-        # 心率异常：任何时候都检查（安全相关）
+        # 心率异常和跌倒：任何时候都检查（安全相关）
         self._check_heart_rate(sensor, now)
+        self._check_fall(sensor, now)
 
         # 只有骑行中才检查其他告警
         if ride_state != RideSessionState.RIDING:
             return
 
         self._check_rear_vehicle(sensor, now)
-        self._check_fall(sensor, now)
 
     def on_stats_updated(self, summary: RideSummary):
         """每秒接收骑行统计更新，用于疲劳告警"""
@@ -105,12 +105,10 @@ class AlertService(QObject):
             self._trigger(AlertType.FATIGUE, msg, "warning", 3600.0, time.time())
 
     def _check_fall(self, sensor: SensorData, now: float):
-        """姿态异常/摔车告警（简化版）"""
-        if sensor.posture == 0:
-            return
-
-        msg = "检测到骑行姿态异常，请注意安全"
-        self._trigger(AlertType.FALL_DETECTED, msg, "warning", 10.0, now)
+        """姿态异常/摔车告警"""
+        if sensor.zt_flag == 0:
+            msg = "检测到跌倒，请确认人身安全"
+            self._trigger(AlertType.FALL_DETECTED, msg, "critical", 60.0, now)
 
     # --------------------------------------------------------------------------
     # 触发与冷却
@@ -119,8 +117,16 @@ class AlertService(QObject):
     def _trigger(self, alert_type: AlertType, message: str, level: str, cooldown_sec: float, now: float):
         type_key = alert_type.value
 
-        # 检查全局开关
-        alert_name = type_key
+        # 检查全局开关（映射 AlertType -> config 中的开关名）
+        alert_name_map = {
+            "rear_vehicle": "rear_vehicle",
+            "heart_rate_high": "heart_rate",
+            "heart_rate_low": "heart_rate",
+            "fatigue": "fatigue",
+            "fall_detected": "fall",
+            "off_route": "off_route",
+        }
+        alert_name = alert_name_map.get(type_key, type_key)
         if not self.config.get_alert(alert_name):
             return
 

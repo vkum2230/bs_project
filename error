@@ -1,5 +1,22 @@
-
+python3 ./main.py 
+[Main] 配置加载完成，心率上限: 180
 已加载 34 个省级行政区（边界框模式）
+[FinalVoice] Edge-TTS 就绪，使用语音: zh-CN-XiaoxiaoNeural
+[HybridVoice] 在线播放器 (Edge-TTS) 已加载
+[PiperVoice] 找到 Piper: /home/hedya/.local/share/piper/piper/piper
+[PiperVoice] 使用模型: /home/hedya/.local/share/piper/zh_CN/zh_CN-huayan-medium.onnx
+[OfflineVoice] Piper 已加载
+[OfflineVoice] MeloTTS 未安装: No module named 'melo'
+[HybridVoice] 离线播放器已加载
+[Main] 混合语音播放器初始化成功（支持离线）
+[Main] LED 控制器初始化成功
+[Ollama] 正在检查 Ollama 服务...
+[Ollama] 服务已在运行
+[Ollama] 发现 1 个可用模型:
+  - my-llama:latest
+[Ollama] 选择模型: my-llama:latest
+[Ollama] 测试模型连接...
+[Ollama] 大模型连接成功！使用模型: my-llama:latest
 ALSA lib pcm_asym.c:105:(_snd_pcm_asym_open) capture slave is not defined
 ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.front
 ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.rear
@@ -45,23 +62,78 @@ Cannot connect to server request channel
 jack server is not running or cannot be started
 JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
 JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-[ReSpeakerVoice] 找到 ReSpeaker 设备: seeed2micvoicec: 1f000a4000.i2s-tlv320aic3x-hifi tlv320aic3x-hifi-0 (hw:2,0) (index=1)
-[ReSpeakerVoice] 音频设备已配置: seeed2micvoicec: 1f000a4000.i2s-tlv320aic3x-hifi tlv320aic3x-hifi-0 (hw:2,0)
-[Main] ReSpeaker 语音播放器初始化成功
-[VoicePlayer] 检测音频设备...
-[VoicePlayer] 找到 ReSpeaker 设备
-[VoicePlayer] 使用 ReSpeaker 设备: hw:2,0
-[VoicePlayer] 使用音频设备: hw:2,0
-[VoicePlayer] 自动选择 TTS 引擎: espeak-ng
-[Main] 语音播放器初始化成功
-[Main] LED 控制器初始化成功
+[VoiceRecorder] 找到 ReSpeaker 输入设备: seeed2micvoicec: 1f000a4000.i2s-tlv320aic3x-hifi tlv320aic3x-hifi-0 (hw:2,0) (index=1)
+[VoiceRecognizer] 加载 Vosk 模型: ./vosk-model-small-cn-0.22
+LOG (VoskAPI:ReadDataFiles():model.cc:213) Decoding params beam=12 max-active=5000 lattice-beam=4
+LOG (VoskAPI:ReadDataFiles():model.cc:216) Silence phones 1:2:3:4:5:6:7:8:9:10
+LOG (VoskAPI:RemoveOrphanNodes():nnet-nnet.cc:948) Removed 0 orphan nodes.
+LOG (VoskAPI:RemoveOrphanComponents():nnet-nnet.cc:847) Removing 0 orphan components.
+LOG (VoskAPI:ReadDataFiles():model.cc:248) Loading i-vector extractor from ./vosk-model-small-cn-0.22/ivector/final.ie
+LOG (VoskAPI:ComputeDerivedVars():ivector-extractor.cc:183) Computing derived variables for iVector extractor
+LOG (VoskAPI:ComputeDerivedVars():ivector-extractor.cc:204) Done.
+LOG (VoskAPI:ReadDataFiles():model.cc:282) Loading HCL and G from ./vosk-model-small-cn-0.22/graph/HCLr.fst ./vosk-model-small-cn-0.22/graph/Gr.fst
+LOG (VoskAPI:ReadDataFiles():model.cc:308) Loading winfo ./vosk-model-small-cn-0.22/graph/phones/word_boundary.int
+[VoiceRecognizer] Vosk 模型加载成功
+[ButtonHandler] 按钮监控已启动 (GPIO 17)
+[ButtonVoiceAssistant] 按钮监听已启动 (GPIO 17)
+[ButtonVoiceAssistant] 语音队列线程已启动
+[Main] 按钮语音助手初始化成功（已集成大模型）
+[Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）
+[Main] 骑行记录仓库已初始化
+[CommService] 启动通信服务...
+[BleServer] SDP 服务注册成功: sudo sdptool add --channel=1 SP[WifiServer] WebSocket 服务已启动: ws://0.0.0.0:8765
+
+[BleServer] 蓝牙已设置为可发现/可连接
+[BleServer] 蓝牙服务已启动，等待连接...
+[MqttBridge] MQTT 连接启动: broker.emqx.io:1883
+[Main] 通信服务已启动（BLE + WiFi）
+[Main] 骑行服务已初始化
+[Main] 安全告警服务已初始化
 qt.qpa.wayland: Wayland does not support QWindow::requestActivate()
 qt.qpa.wayland: Wayland does not support QWindow::requestActivate()
 qt.qpa.wayland: Setting cursor position is not possible on wayland
+[SmartPinyinIME] 正在加载字库...
+[SmartPinyinIME] 加载完成: 1455汉字
+[PinyinHandler] 智能拼音输入法初始化成功
 成功打开串口: /dev/ttyAMA2
-js: Uncaught TypeError: AMap.Scale is not a constructor
-[Voice] 播放欢迎语音...
-[VoicePlayer] 播报: 你好，我是骑行小智
-[Voice] 欢迎语音播报成功
-[VoicePlayer] espeak-ng 播报成功
+[MqttBridge] MQTT 连接成功 (client_id=b'smartride-pi5-4704c4b3', rc=0)
+[MqttBridge] 已订阅命令主题: smartride/command
+[Map] ✅ 地图加载成功!
+[Main] ✅ 地图页面加载成功！
+[VoiceMessage] > 🗺️ 地图加载成功 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1207 on_map_loaded]
+[Voice] ========== 播放欢迎语音 ==========
+[Voice] 使用播放器: HybridVoicePlayer
+[Voice] 开始播报: '你好，我是骑行小智'...
+[HybridVoice] 开始播报: 你好，我是骑行小智...[Voice] 播报调用返回: 成功
+
+[Voice] LED 设置为常亮绿色
+[Voice] ========== 欢迎语音处理完成 ==========[HybridVoice] 网络状态: 可用
+
+[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/drivers/audio/piper_voice.py:296 _do_speak]
+[HybridVoice] 优先尝试 Edge-TTS 在线播报（35秒总超时）...
+[HybridVoice] Edge-TTS 线程启动...[HybridVoice] 等待 Edge-TTS 完成...
+
+[FinalVoice] 播报: 你好，我是骑行小智
+[FinalVoice] Edge-TTS 尝试 1/2...
+[FinalVoice] Edge-TTS 失败 (尝试 1/2): ClientConnectorError: Cannot connect to host speech.platform.bing.com:443 ssl:<ssl.SSLContext object at 0x7ffed27b7800> [Connection reset by peer]
+[FinalVoice] Edge-TTS 尝试 2/2...
+[FinalVoice] Edge-TTS 失败 (尝试 2/2): ClientConnectorError: Cannot connect to host speech.platform.bing.com:443 ssl:<ssl.SSLContext object at 0x7ffed27b7800> [Connection reset by peer]
+[FinalVoice] Edge-TTS 失败
+[HybridVoice] Edge-TTS 线程完成，结果: False
+[HybridVoice] ✗ Edge-TTS 失败，结果: False
+[HybridVoice] Piper 状态: 可用
+[HybridVoice] 尝试 Piper 离线播报...
+[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/drivers/audio/offline_voice.py:71 speak]
+[OfflineVoice] 使用 Piper...
+[PiperVoice] 播报: 你好，我是骑行小智...
+[PiperVoice] 开始合成，模型: /home/hedya/.local/share/piper/zh_CN/zh_CN-huayan-medium.onnx
+[PiperVoice] 合成完成，开始播放...
+[PiperVoice] 播放完成
+[PiperVoice] 清理临时文件
+[OfflineVoice] Piper 成功
+[HybridVoice] ✓ Piper 离线播报成功
 退出程序...
+[CommService] 停止通信服务...
+[BleServer] 服务异常: [Errno 9] Bad file descriptor
+[MqttBridge] MQTT 已断开 (rc=0, flags=DisconnectFlags(is_disconnect_packet_from_server=False))
+[CommService] BLE错误: [BleServer] 服务异常: [Errno 9] Bad file descriptor

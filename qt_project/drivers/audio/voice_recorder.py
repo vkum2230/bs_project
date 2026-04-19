@@ -398,6 +398,7 @@ class ButtonVoiceAssistant:
         self._cleaned_response = ""  # 已清理的完整响应文本
         self._played_len = 0         # 已播放的字符数
         self._last_speak_time = 0    # 上次播报时间
+        self._sentence_buffer = []   # 句子缓存，满两条才入队播报
         
         # 语音队列 - 确保按顺序播放不重叠
         self._speak_queue = queue.Queue()
@@ -437,9 +438,12 @@ class ButtonVoiceAssistant:
                     except queue.Empty:
                         preloaded_text = None
                     
-                    # 播放当前句子
-                    self.voice_player.speak(text, block=True, show_in_ui=False)
-                    
+                    # 播放当前句子（异常隔离，单句失败不阻塞后续）
+                    try:
+                        self.voice_player.speak(text, block=True, show_in_ui=False)
+                    except Exception as e:
+                        print(f"[ButtonVoiceAssistant] 单句播放异常: {e}")
+
                     # 标记当前任务完成（如果是从队列取的）
                     if not is_preloaded:
                         self._speak_queue.task_done()
@@ -650,9 +654,9 @@ class ButtonVoiceAssistant:
                     # 非数据查询问题，走大模型（不传递骑行数据）
                     print(f"[ButtonVoiceAssistant] 调用大模型: {clean_text}")
                     
-                    system_prompt = "你是骑行助手小智。简洁回答，无Markdown。"
+                    system_prompt = "你是骑行助手小智。简洁回答，无Markdown。每次回复严格控制在100字以内，务必完整收尾，绝不截断。"
                     enhanced_prompt = clean_text
-                    
+
                     # 使用流式输出，边生成边显示和播报
                     # 注意：流式输出是异步的，_on_stream_complete 会重置 _processing 状态
                     self._reset_stream_state()  # 重置所有流式状态
@@ -661,7 +665,7 @@ class ButtonVoiceAssistant:
                         on_token=lambda token: self._on_stream_token(token),
                         on_complete=lambda full: self._on_stream_complete(full),
                         system_prompt=system_prompt,
-                        max_tokens=512  # 允许生成更长的回复
+                        max_tokens=128  # 100字中文约130token，128足够
                     )
                     # 流式输出已启动，_processing 状态将在 _on_stream_complete 中重置
                     return  # 提前返回，不执行后面的清理
@@ -721,42 +725,45 @@ class ButtonVoiceAssistant:
         self._check_and_speak_streaming()
     
     def _check_and_speak_streaming(self):
-        """检查并播报新增内容 - 只在完整句子结束符处分段"""
-        import time
-        
-        current_time = time.time()
-        
+        """检查并播报新增内容 - 只以 '。' 断句，缓存满两句再入队"""
         # 重新清理当前响应（确保一致性）
         new_cleaned = self._clean_response(self._current_response)
-        
+
         # 如果新清理的文本比已存储的短，使用已存储的
         if len(new_cleaned) < len(self._cleaned_response):
             new_cleaned = self._cleaned_response
         else:
-            # 更新存储的清理文本
             self._cleaned_response = new_cleaned
-        
-        # 检查是否有新内容需要播报
+
+        # 检查是否有新内容需要处理
         if self._played_len >= len(self._cleaned_response):
             return
-        
+
         # 获取未播报的部分
         new_part = self._cleaned_response[self._played_len:]
         if not new_part:
             return
-        
-        # 只在完整句子结束符（。！？）处分段
-        for i, char in enumerate(new_part):
-            if char in "。！？":
-                # 找到完整句子
-                segment = new_part[:i+1]
-                
-                # 加入队列播放
-                self._queue_speak(segment)
-                self._played_len += len(segment)
-                self._last_speak_time = current_time
+
+        # 只在 '。' 处分段，其他标点（！？）不当作断句点
+        while True:
+            period_idx = new_part.find("。")
+            if period_idx == -1:
+                break
+
+            # 提取包含句号在内的完整句子
+            segment = new_part[:period_idx + 1]
+            self._sentence_buffer.append(segment)
+            self._played_len += len(segment)
+
+            # 缓存满两条才一次性入队，给 TTS 足够缓冲
+            if len(self._sentence_buffer) >= 2:
+                for s in self._sentence_buffer:
+                    self._queue_speak(s)
+                self._sentence_buffer = []
                 self._speak_started = True
-                return  # 一次只处理一句，下次token继续
+
+            # 继续处理句号之后的剩余内容
+            new_part = new_part[period_idx + 1:]
     
     def _clean_response(self, text: str) -> str:
         """清理模型回复，去除Markdown格式符号"""
@@ -800,15 +807,22 @@ class ButtonVoiceAssistant:
             
             # 更新清理后的文本
             self._cleaned_response = full_response
-            
-            # 播报剩余未播报的内容（从已播放位置到结尾）
+
+            # 1. 先 flush 缓存中的句子（即使不满两条，流式完成时也要播报）
+            if self._sentence_buffer:
+                print(f"[ButtonVoiceAssistant] 完成时 flush 缓存句子: {len(self._sentence_buffer)} 条")
+                for s in self._sentence_buffer:
+                    self._queue_speak(s)
+                self._sentence_buffer = []
+
+            # 2. 播报剩余未播报的内容（从已播放位置到结尾，没有句号结尾的剩余）
             if self._played_len < len(full_response):
                 remaining = full_response[self._played_len:]
                 if remaining.strip():
                     print(f"[ButtonVoiceAssistant] 完成时播报剩余: {remaining[:50]}...")
                     self._queue_speak(remaining)
                     self._played_len = len(full_response)
-            
+
             # LED 恢复呼吸灯状态
             if self.led_controller:
                 try:
@@ -836,6 +850,7 @@ class ButtonVoiceAssistant:
         self._played_len = 0             # 已播放长度
         self._last_speak_time = 0
         self._stream_displayed = False
+        self._sentence_buffer = []       # 句子缓存
     
     def _handle_ollama_response(self, response: str):
         """处理 Ollama 大模型返回的结果（非流式，备用）"""

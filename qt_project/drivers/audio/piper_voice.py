@@ -253,22 +253,31 @@ class HybridVoicePlayer:
         self._lock = threading.Lock()
     
     def _check_network(self) -> bool:
-        """检查网络连接"""
-        try:
-            import socket
-            socket.setdefaulttimeout(2)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
-            return True
-        except:
-            return False
+        """检查网络连接（多地址容错，避免误判）"""
+        import socket
+        check_hosts = [
+            ("223.5.5.5", 53),    # 阿里云 DNS
+            ("114.114.114.114", 53), # 114 DNS
+            ("8.8.8.8", 53),      # Google DNS（备用）
+        ]
+        for host, port in check_hosts:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                sock.connect((host, port))
+                sock.close()
+                return True
+            except Exception:
+                continue
+        return False
     
     def speak(self, text: str, block: bool = False, show_in_ui: bool = True) -> bool:
         """
         播报文本（优先在线，超时切换离线）
-        
+
         优先级：
-        1. Edge-TTS（在线，优先使用，带8秒超时）
-        2. Piper（Edge-TTS超时/失败或网络不可用时）
+        1. 阿里云通义 TTS（在线，流式输出，国内直连）
+        2. Piper/MeloTTS（在线超时/失败或网络不可用时）
         3. espeak（保底方案）
         """
         if not text:
@@ -286,46 +295,46 @@ class HybridVoicePlayer:
                 if show_in_ui and self._message_callback:
                     self._message_callback(text, icon="🔊")
 
-                # 优先尝试在线播放（Edge-TTS），带超时
+                # 优先尝试在线播放（阿里云通义 TTS），流式输出
                 if self._online_player and has_network:
-                    print("[HybridVoice] 优先尝试 Edge-TTS 在线播报（20秒超时）...")
+                    print("[HybridVoice] 优先尝试阿里云 TTS 在线播报（60秒总超时）...")
                     try:
                         import threading
-                        edge_result = [None]
+                        online_result = [None]
 
-                        def _edge_speak():
+                        def _online_speak():
                             try:
-                                print("[HybridVoice] Edge-TTS 线程启动...")
+                                print("[HybridVoice] 阿里云 TTS 线程启动...")
                                 # UI 回调由 HybridVoicePlayer 统一处理，在线播放器不重复显示
-                                edge_result[0] = self._online_player.speak(text, block=True, show_in_ui=False)
-                                print(f"[HybridVoice] Edge-TTS 线程完成，结果: {edge_result[0]}")
+                                online_result[0] = self._online_player.speak(text, block=True, show_in_ui=False)
+                                print(f"[HybridVoice] 阿里云 TTS 线程完成，结果: {online_result[0]}")
                             except Exception as e:
-                                print(f"[HybridVoice] Edge-TTS 线程错误: {e}")
+                                print(f"[HybridVoice] 阿里云 TTS 线程错误: {e}")
                                 import traceback
                                 traceback.print_exc()
-                                edge_result[0] = False
+                                online_result[0] = False
 
-                        edge_thread = threading.Thread(target=_edge_speak)
-                        edge_thread.daemon = True
-                        edge_thread.start()
-                        print("[HybridVoice] 等待 Edge-TTS 完成...")
-                        edge_thread.join(timeout=20)  # 最多等待20秒
+                        online_thread = threading.Thread(target=_online_speak)
+                        online_thread.daemon = True
+                        online_thread.start()
+                        print("[HybridVoice] 等待阿里云 TTS 完成...")
+                        online_thread.join(timeout=60)  # 最多等待60秒
 
-                        if edge_thread.is_alive():
-                            print("[HybridVoice] ✗ Edge-TTS 超时（20秒），切换到离线语音")
-                        elif edge_result[0] is True:
-                            print("[HybridVoice] ✓ Edge-TTS 在线播报成功")
+                        if online_thread.is_alive():
+                            print("[HybridVoice] ✗ 阿里云 TTS 超时（60秒），切换到离线语音")
+                        elif online_result[0] is True:
+                            print("[HybridVoice] ✓ 阿里云 TTS 在线播报成功")
                             return True
                         else:
-                            print(f"[HybridVoice] ✗ Edge-TTS 失败，结果: {edge_result[0]}")
+                            print(f"[HybridVoice] ✗ 阿里云 TTS 失败，结果: {online_result[0]}")
                     except Exception as e:
-                        print(f"[HybridVoice] ✗ Edge-TTS 错误: {e}")
+                        print(f"[HybridVoice] ✗ 阿里云 TTS 错误: {e}")
                         import traceback
                         traceback.print_exc()
                 elif not self._online_player:
-                    print("[HybridVoice] Edge-TTS 播放器未初始化")
+                    print("[HybridVoice] 阿里云 TTS 播放器未初始化")
                 else:
-                    print("[HybridVoice] 网络不可用，跳过 Edge-TTS")
+                    print("[HybridVoice] 网络不可用，跳过阿里云 TTS")
                 
                 # Edge-TTS 失败或超时，尝试离线播放（Piper）
                 piper_available = self._offline_player and self._offline_player.is_available()

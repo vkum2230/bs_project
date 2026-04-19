@@ -66,12 +66,23 @@ class OfflineVoicePlayer:
         """播报文本"""
         if not text:
             return False
-        
+
         if show_in_ui and self._message_callback:
             self._message_callback(text, icon="🔊")
-        
+
         def _do_speak():
-            # 优先使用 Piper（最快）
+            # 优先使用 MeloTTS（音质最好）
+            if self._melo:
+                try:
+                    print("[OfflineVoice] 使用 MeloTTS...")
+                    result = self._speak_melo(text)
+                    if result:
+                        print("[OfflineVoice] MeloTTS 成功")
+                        return True
+                except Exception as e:
+                    print(f"[OfflineVoice] MeloTTS 失败: {e}")
+
+            # 备用 Piper（最快）
             if self._piper:
                 try:
                     print("[OfflineVoice] 使用 Piper...")
@@ -81,15 +92,7 @@ class OfflineVoicePlayer:
                         return True
                 except Exception as e:
                     print(f"[OfflineVoice] Piper 失败: {e}")
-            
-            # 尝试 MeloTTS（音质更好但较慢）
-            if self._melo:
-                try:
-                    print("[OfflineVoice] 使用 MeloTTS...")
-                    return self._speak_melo(text)
-                except Exception as e:
-                    print(f"[OfflineVoice] MeloTTS 失败: {e}")
-            
+
             # 保底 espeak
             print("[OfflineVoice] 使用 espeak...")
             return self._speak_espeak(text)

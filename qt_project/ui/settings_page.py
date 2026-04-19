@@ -98,6 +98,18 @@ class SettingsPage(QWidget):
         card_layout.addWidget(lbl_age, 3, 0)
         card_layout.addWidget(self.spin_age, 3, 1)
 
+        # 后方来车距离阈值
+        lbl_rear = QLabel("后方来车阈值 (m)")
+        lbl_rear.setStyleSheet("color: #AAAAAA; background: transparent;")
+        lbl_rear.setFont(QFont("Helvetica", 11))
+        self.spin_rear = QDoubleSpinBox()
+        self.spin_rear.setRange(1.0, 20.0)
+        self.spin_rear.setDecimals(1)
+        self.spin_rear.setValue(self.config.get("rear_dist_alert_m", 5.0))
+        self.spin_rear.setStyleSheet(self._spin_style())
+        card_layout.addWidget(lbl_rear, 4, 0)
+        card_layout.addWidget(self.spin_rear, 4, 1)
+
         layout.addWidget(card)
 
         # 告警开关卡片
@@ -122,7 +134,7 @@ class SettingsPage(QWidget):
 
         checkbox_grid = QGridLayout()
         checkbox_grid.setSpacing(10)
-        checkbox_grid.setHorizontalSpacing(16)
+        checkbox_grid.setHorizontalSpacing(28)
         checkbox_grid.setVerticalSpacing(10)
 
         self.chk_rear = QCheckBox("后方来车告警")
@@ -143,10 +155,10 @@ class SettingsPage(QWidget):
         self.chk_fall = QCheckBox("姿态异常/摔车检测")
         self.chk_fall.setChecked(alerts.get("fall", True))
         self.chk_fall.setStyleSheet(self._checkbox_style())
-        checkbox_grid.addWidget(self.chk_fall, 1, 0)
+        checkbox_grid.addWidget(self.chk_fall, 0, 3)
 
-        # 让第一列占满剩余空间，保持对齐
-        checkbox_grid.setColumnStretch(3, 1)
+        # 让最后一列占满剩余空间，保持对齐
+        checkbox_grid.setColumnStretch(4, 1)
 
         alert_layout.addLayout(checkbox_grid)
 
@@ -224,6 +236,7 @@ class SettingsPage(QWidget):
         self.config.set("heart_rate_min", self.spin_hr_min.value())
         self.config.set("weight_kg", round(self.spin_weight.value(), 1))
         self.config.set("age", self.spin_age.value())
+        self.config.set("rear_dist_alert_m", round(self.spin_rear.value(), 1))
 
         alerts = {
             "rear_vehicle": self.chk_rear.isChecked(),
@@ -247,6 +260,7 @@ class SettingsPage(QWidget):
             self.spin_hr_min.setValue(50)
             self.spin_weight.setValue(70.0)
             self.spin_age.setValue(30)
+            self.spin_rear.setValue(5.0)
             self.chk_rear.setChecked(True)
             self.chk_hr.setChecked(True)
             self.chk_fatigue.setChecked(True)

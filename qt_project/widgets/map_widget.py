@@ -13,17 +13,23 @@ import json
 
 # 导入智能拼音输入法
 try:
-    # 尝试相对导入（作为包的一部分）
-    from .smart_pinyin_ime import get_ime
+    from ui.smart_pinyin_ime import get_ime
     _HAS_SMART_IME = True
 except ImportError:
     try:
-        # 尝试绝对导入（直接运行）
-        from smart_pinyin_ime import get_ime
+        from qt_project.ui.smart_pinyin_ime import get_ime
         _HAS_SMART_IME = True
     except ImportError:
-        _HAS_SMART_IME = False
-        print("[警告] 智能拼音输入法加载失败，使用基础词典")
+        try:
+            from .smart_pinyin_ime import get_ime
+            _HAS_SMART_IME = True
+        except ImportError:
+            try:
+                from smart_pinyin_ime import get_ime
+                _HAS_SMART_IME = True
+            except ImportError:
+                _HAS_SMART_IME = False
+                print("[警告] 智能拼音输入法加载失败，使用基础词典")
 
 
 class NavigationHandler(QObject):
@@ -841,9 +847,6 @@ class MapWidget(QWidget):
         
         .btn:active {{ transform: scale(0.95); }}
         /* 四个功能按钮 */
-        .btn-keyboard {{ background: linear-gradient(135deg, #f39c12, #e67e22); font-size: 18px; padding: 12px; }}
-        .btn-keyboard:hover::after {{ content: '键盘'; position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 10000; }}
-        
         .btn-route {{ background: linear-gradient(135deg, #3498db, #2980b9); }}
         .btn-route:hover::after {{ content: '规划路线'; position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 10000; }}
         
@@ -939,9 +942,9 @@ class MapWidget(QWidget):
         /* ========== 右侧半透明键盘 ========== */
         .keyboard-wrapper {{
             position: fixed;
-            bottom: 15px;
+            bottom: 90px;
             right: 10px;
-            width: 400px;
+            width: 480px;
             z-index: 3000;
             display: none;
         }}
@@ -955,7 +958,7 @@ class MapWidget(QWidget):
             border-radius: 12px 12px 0 0;
             border: 1px solid rgba(255,255,255,0.1);
             border-bottom: none;
-            padding: 10px 12px;
+            padding: 12px 14px;
             margin-bottom: 0;
         }}
         
@@ -995,13 +998,13 @@ class MapWidget(QWidget):
             background: rgba(100, 100, 100, 0.7);
             color: #fff;
             border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-size: 16px;
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 18px;
             cursor: pointer;
             white-space: nowrap;
             transition: all 0.1s;
-            min-width: 36px;
+            min-width: 42px;
             text-align: center;
         }}
         
@@ -1029,33 +1032,33 @@ class MapWidget(QWidget):
             border-radius: 0 0 12px 12px;
             border: 1px solid rgba(255,255,255,0.1);
             border-top: 1px solid rgba(255,255,255,0.05);
-            padding: 10px 8px 12px 8px;
+            padding: 12px 10px 14px 10px;
         }}
-        
+
         .kb-row {{
             display: flex;
-            gap: 5px;
-            margin-bottom: 6px;
+            gap: 6px;
+            margin-bottom: 7px;
             justify-content: center;
         }}
-        
+
         /* 按键样式 - 半透明 */
         .key {{
             background: rgba(120, 120, 120, 0.6);
             color: white;
             border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 0;
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 500;
             cursor: pointer;
-            height: 40px;
+            height: 50px;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: all 0.08s;
             flex: 1;
-            max-width: 38px;
+            max-width: 48px;
         }}
         
         .key:hover {{
@@ -1068,29 +1071,29 @@ class MapWidget(QWidget):
         }}
         
         /* 特殊按键 */
-        .key-shift {{ 
+        .key-shift {{
             flex: 1.3;
-            max-width: 50px;
+            max-width: 62px;
             background: rgba(100, 100, 100, 0.65);
-            font-size: 14px;
+            font-size: 16px;
         }}
-        .key-back {{ 
+        .key-back {{
             flex: 1.3;
-            max-width: 50px;
+            max-width: 62px;
             background: rgba(110, 110, 110, 0.65);
-            font-size: 14px;
+            font-size: 16px;
         }}
-        .key-space {{ 
+        .key-space {{
             flex: 4;
-            max-width: 180px;
-            font-size: 14px;
+            max-width: 220px;
+            font-size: 16px;
             background: rgba(120, 120, 120, 0.6);
         }}
-        .key-enter {{ 
+        .key-enter {{
             flex: 1.4;
-            max-width: 65px;
+            max-width: 78px;
             background: rgba(46, 204, 113, 0.7);
-            font-size: 14px;
+            font-size: 16px;
             color: white;
             font-weight: 600;
         }}
@@ -1184,8 +1187,7 @@ class MapWidget(QWidget):
     <div class="search-panel">
         <div style="position: relative;">
             <div class="input-row">
-                <input type="text" id="searchInput" class="search-input" placeholder="点击键盘输入目的地..." readonly>
-                <button class="btn btn-keyboard" onclick="toggleKeyboard()" title="键盘">⌨️</button>
+                <input type="text" id="searchInput" class="search-input" placeholder="点击输入目的地..." readonly onclick="showKeyboard()">
                 <button class="btn btn-route" onclick="planRoute()" title="规划路线">🗺️ 路线</button>
                 <button class="btn btn-nav" onclick="enterNavMode()" title="导航模式">🧭 导航</button>
                 <button class="btn btn-locate" onclick="showCurrentLocation()" title="当前位置">📍</button>
@@ -1282,13 +1284,14 @@ class MapWidget(QWidget):
     
     <script>
         // 全局变量
-        var map, currentPos, destPos, currentMarker, destMarker, trackLine;
+        var map, currentPos, destPos, currentMarker, destMarker, trackLine, yawMarker;
         var isNavigating = false, routeInfo = null, trackPoints = [];
         var pinyinBuffer = "";
         var isShiftOn = false;
         var amapAPI = null;
         var pinyinHandler = null;
         var isMapInitialized = false;
+        var pendingYaw = null;
         
         // DOM 加载完成后初始化
         document.addEventListener("DOMContentLoaded", function() {{
@@ -1337,6 +1340,17 @@ class MapWidget(QWidget):
                 console.error('QWebChannel 未就绪');
                 document.getElementById('locationInfo').innerHTML = '⚠️ API未连接';
             }}
+
+            // 点击键盘外部区域隐藏键盘（第一次点击生效）
+            document.addEventListener('click', function(e) {{
+                var kb = document.getElementById('keyboard');
+                var input = document.getElementById('searchInput');
+                var suggestions = document.getElementById('suggestionsList');
+                if (!kb || !kb.classList.contains('active')) return;
+                if (kb.contains(e.target) || input.contains(e.target)) return;
+                if (suggestions && suggestions.contains(e.target)) return;
+                hideKeyboard();
+            }});
         }}
         
         // 初始化地图（不依赖 API）
@@ -2153,10 +2167,12 @@ class MapWidget(QWidget):
             input.value += ch;
             clearPinyinState();
             currentCandidatePage = 0;  // 重置页码
-            
+
             if (input.value.length >= 2) {{
                 fetchInputTips(input.value);
             }}
+            // 确保键盘保持显示，方便继续输入
+            showKeyboard();
         }}
         
         function clearPinyinState() {{
@@ -2205,11 +2221,11 @@ class MapWidget(QWidget):
             hideKeyboard();
         }}
         
-        function toggleKeyboard() {{
+        function showKeyboard() {{
             var kb = document.getElementById('keyboard');
-            kb.classList.toggle('active');
+            kb.classList.add('active');
         }}
-        
+
         function hideKeyboard() {{
             document.getElementById('keyboard').classList.remove('active');
             document.getElementById('suggestionsList').style.display = 'none';
@@ -2648,32 +2664,40 @@ class MapWidget(QWidget):
             // 重置导航状态
             window.navRouteIndex = 0;
             
-            // 移除蓝色导航箭头，恢复普通位置标记
+            // 移除蓝色导航箭头、导航直线，恢复普通位置标记
             if (window.navArrowMarker) {{
                 map.remove(window.navArrowMarker);
                 window.navArrowMarker = null;
             }}
-            
+            if (window.navStraightLine) {{
+                map.remove(window.navStraightLine);
+                window.navStraightLine = null;
+            }}
+
             // 恢复普通位置标记
             if (currentPos && !currentMarker) {{
                 currentMarker = new AMap.Marker({{
                     position: currentPos,
                     map: map,
                     title: '当前位置',
-                    icon: new AMap.Icon({{
-                        size: new AMap.Size(24, 24),
-                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/loc.png',
-                        imageSize: new AMap.Size(24, 24)
-                    }})
+                    offset: new AMap.Pixel(-8, -8),
+                    content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
                 }});
             }}
+            // 恢复航向标记（如果有缓存的航向）
+            if (currentPos && pendingYaw !== null && !yawMarker) {{
+                updateYaw(pendingYaw);
+            }}
+            // 清除导航直线
+            if (window.navStraightLine) {{ map.remove(window.navStraightLine); window.navStraightLine = null; }}
         }}
-        
+
         function clearAll() {{
             stopNavigation();
-            
+
             // 清除路线
             if (window.routeLine) {{ map.remove(window.routeLine); window.routeLine = null; }}
+            if (window.navStraightLine) {{ map.remove(window.navStraightLine); window.navStraightLine = null; }}
             
             // 清除路线箭头标记
             if (window.routeArrowMarkers) {{
@@ -2685,6 +2709,7 @@ class MapWidget(QWidget):
             if (window.startMarker) {{ map.remove(window.startMarker); window.startMarker = null; }}
             if (window.endMarker) {{ map.remove(window.endMarker); window.endMarker = null; }}
             if (window.navArrowMarker) {{ map.remove(window.navArrowMarker); window.navArrowMarker = null; }}
+            if (yawMarker) {{ map.remove(yawMarker); yawMarker = null; }}
 
             // 清除历史轨迹
             if (window.historyLine) {{ map.remove(window.historyLine); window.historyLine = null; }}
@@ -2825,23 +2850,23 @@ class MapWidget(QWidget):
                 showToast('⚠️ 请先选择目的地', 'warning');
                 return;
             }}
-            
+
             // 开始导航
             if (!isNavigating) {{
                 doNavigate();
             }}
-            
+
             // 设置骑行导航级别的比例尺
             var centerPos = currentPos || window.routeStartPos || map.getCenter();
             map.setCenter(centerPos);
             map.setZoom(18);
-            
-            // 移除起点绿色圈（导航模式下起点就是当前位置，用蓝色箭头表示）
+
+            // 移除起点绿色圈（导航模式下起点就是当前位置）
             if (window.startMarker) {{
                 map.remove(window.startMarker);
                 window.startMarker = null;
             }}
-            
+
             // 确保终点红色圈存在
             if (!window.endMarker) {{
                 window.endMarker = new AMap.Marker({{
@@ -2853,22 +2878,40 @@ class MapWidget(QWidget):
                     content: '<div style="width: 24px; height: 24px; background: #f44336; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.5);"></div>'
                 }});
             }}
-            
-            // 移除普通位置标记，添加蓝色导航箭头
-            if (currentMarker) {{
-                map.remove(currentMarker);
-                currentMarker = null;
-            }}
-            
-            // 清除旧的导航箭头
+
+            // 保留普通位置标记和航偏角箭头，只清理旧的蓝色导航箭头
             if (window.navArrowMarker) {{
                 map.remove(window.navArrowMarker);
+                window.navArrowMarker = null;
             }}
-            
-            // 创建新的蓝色导航箭头
-            window.navArrowMarker = createNavArrowMarker();
-            window.lastNavPos = currentPos ? [currentPos[0], currentPos[1]] : null;
-            
+
+            // 确保当前位置标记存在
+            if (currentPos && !currentMarker) {{
+                currentMarker = new AMap.Marker({{
+                    position: currentPos,
+                    map: map,
+                    title: '当前位置',
+                    offset: new AMap.Pixel(-8, -8),
+                    content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
+                }});
+            }}
+            if (currentPos && pendingYaw !== null && !yawMarker) {{
+                updateYaw(pendingYaw);
+            }}
+
+            // 导航模式下用红色直线连接起点和终点（保留已有的规划路线）
+            if (window.navStraightLine) {{ map.remove(window.navStraightLine); }}
+            var startForNav = currentPos || window.routeStartPos || map.getCenter();
+            window.navStraightLine = new AMap.Polyline({{
+                path: [startForNav, destPos],
+                strokeColor: '#f44336',
+                strokeWeight: 4,
+                strokeOpacity: 0.9,
+                lineJoin: 'round',
+                zIndex: 99
+            }});
+            window.navStraightLine.setMap(map);
+
             // 显示导航面板
             if (isNavigating) {{
                 document.getElementById('navPanel').style.display = 'block';
@@ -2883,19 +2926,24 @@ class MapWidget(QWidget):
         function updatePosition(lng, lat, province) {{
             var newPos = [lng, lat];
             currentPos = newPos;
-            
+
+            // 如果之前有缓存的 yaw，现在位置已就绪，立即应用
+            if (pendingYaw !== null) {{
+                updateYaw(pendingYaw);
+            }}
+
             // 如果在导航中，地图跟随当前位置
             if (isNavigating) {{
                 map.setCenter(currentPos);
-                
-                // 更新蓝色导航箭头位置
-                if (window.navArrowMarker) {{
-                    // 计算移动方向并旋转箭头
-                    updateNavArrowAngle(newPos);
-                    window.navArrowMarker.setPosition(currentPos);
-                    window.lastNavPos = [newPos[0], newPos[1]];
+
+                // 导航模式下保持 currentMarker + yawMarker 更新
+                if (currentMarker) {{
+                    currentMarker.setPosition(currentPos);
                 }}
-                
+                if (yawMarker) {{
+                    yawMarker.setPosition(currentPos);
+                }}
+
                 // 检查是否需要播报下一条指令
                 checkNavStep();
             }}
@@ -2914,12 +2962,12 @@ class MapWidget(QWidget):
                         position: currentPos,
                         map: map,
                         title: '当前位置',
-                        icon: new AMap.Icon({{
-                            size: new AMap.Size(24, 24),
-                            image: 'https://webapi.amap.com/theme/v1.3/markers/n/loc.png',
-                            imageSize: new AMap.Size(24, 24)
-                        }})
+                        offset: new AMap.Pixel(-8, -8),
+                        content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
                     }});
+                }}
+                if (yawMarker) {{
+                    yawMarker.setPosition(currentPos);
                 }}
                 map.setCenter(currentPos);
                 map.setZoom(16);
@@ -2944,7 +2992,38 @@ class MapWidget(QWidget):
         }}
         
         window.updatePosition = updatePosition;
-        
+
+        // 更新航偏角方向标记（非导航模式下显示）
+        // 与 currentMarker 共存：定位点 + 旋转航向箭头
+        function updateYaw(angle) {{
+            if (!currentPos) {{
+                pendingYaw = angle;
+                return;
+            }}
+            pendingYaw = null;
+            var arrowHtml = '<div id="yaw-arrow" style="width:48px;height:48px;transform-origin:center center;">' +
+                '<svg width="48" height="48" viewBox="0 0 48 48" style="overflow:visible;">' +
+                '<polygon points="24,6 38,34 24,26 10,34" fill="rgba(77,184,255,0.85)" stroke="#FFFFFF" stroke-width="2"/>' +
+                '<circle cx="24" cy="24" r="3" fill="#FFFFFF" stroke="#4DB8FF" stroke-width="1.5"/>' +
+                '</svg></div>';
+            if (!yawMarker) {{
+                yawMarker = new AMap.Marker({{
+                    position: currentPos,
+                    map: map,
+                    content: arrowHtml,
+                    offset: new AMap.Pixel(-24, -24),
+                    zIndex: 111
+                }});
+            }} else {{
+                yawMarker.setPosition(currentPos);
+            }}
+            var el = document.getElementById('yaw-arrow');
+            if (el) {{
+                el.style.transform = 'rotate(' + angle + 'deg)';
+            }}
+        }}
+        window.updateYaw = updateYaw;
+
         // Toast 提示函数
         function showToast(message, type = 'info', duration = 2500) {{
             var toast = document.getElementById('toast');
@@ -2976,7 +3055,12 @@ class MapWidget(QWidget):
         self.current_lon = lon
         js_code = f"updatePosition({lon}, {lat}, '{province}');"
         self.web_view.page().runJavaScript(js_code)
-    
+
+    def update_yaw(self, angle):
+        """更新航偏角箭头（0°指北，顺时针增加）"""
+        js_code = f"updateYaw({angle});"
+        self.web_view.page().runJavaScript(js_code)
+
     def set_zoom(self, zoom_level):
         """设置地图缩放级别
         

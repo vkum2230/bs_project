@@ -27,10 +27,12 @@
 
 | # | 功能 | 文件/模块 | 状态 |
 |---|------|----------|------|
-| 1 | PyQt5 主界面（仪表盘 + 数据卡片 + 消息框） | `main.py`, `ui_main_window.py` | 完成 |
+| # | 功能 | 文件/模块 | 状态 |
+|---|------|----------|------|
+| 1 | PyQt5 主界面（仪表盘 + 数据卡片 + 消息框） | `main.py`, `widgets/` | 完成 |
 | 2 | 自定义圆形仪表盘控件 | `widgets/circle_gauge.py` | 完成 |
-| 3 | STM32 串口数据采集（JSON 协议） | `drivers/serial_handler.py` | 完成 |
-| 4 | 高德在线地图（JS API）+ 实时位置标记 | `widgets/map_widget.py` | 完成 |
+| 3 | STM32 串口数据采集（JSON 协议） | `drivers/serial_handler.py`, `core/protocol.py` | 完成 |
+| 4 | 高德在线地图（JS API）+ 实时位置标记 + 航向箭头 | `widgets/map_widget.py` | 完成 |
 | 5 | 离线省份判断 + 语音播报 | `core/location_service.py` | 完成 |
 | 6 | Piper 本地 TTS + Edge-TTS 在线回退 | `drivers/audio/piper_voice.py` | 完成 |
 | 7 | 按钮语音交互（GPIO 17）+ LED 状态指示 | `drivers/audio/voice_recorder.py` | 完成 |
@@ -42,6 +44,13 @@
 | 13 | 通信调度器（BLE + WiFi 统一调度） | `services/comm_service.py` | 完成 |
 | 14 | MQTT 调试桥接器（MQTTX 兼容） | `services/comm_service.py` | 完成 |
 | 15 | 断连缓存队列 | `persistence/buffer_queue.py` | 完成 |
+| 16 | 骑行会话管理（开始/暂停/结束/统计） | `services/ride_service.py` | 完成 |
+| 17 | 骑行记录本地 FIT/GPX 存储 | `persistence/ride_repository.py` | 完成 |
+| 18 | 历史记录页面 + 轨迹回放 | `ui/history_page.py` | 完成 |
+| 19 | 安全告警系统（后方来车/心率/疲劳/跌倒） | `services/alert_service.py` | 完成 |
+| 20 | 用户配置管理 + 设置页面 | `persistence/config_manager.py`, `ui/settings_page.py` | 完成 |
+| 21 | 地图键盘拼音输入法 | `ui/smart_pinyin_ime.py` | 完成 |
+| 22 | 地图导航模式（路线规划 + 语音导航） | `widgets/map_widget.py` | 完成 |
 
 ---
 
@@ -54,12 +63,12 @@
 - **~~断连缓存队列~~** ✅ 已完成
 - **断连缓存补发联调**：需要在真实断开/重连场景下验证批量补发逻辑
 
-### P1 — 数据持久化与安全
-- **本地 FIT/GPX 文件存储**：骑行记录生成标准运动文件
-- **骑行会话管理**：开始/暂停/结束骑行，时间/距离/爬升计算
-- **历史记录页面**：PyQt 上查看骑行列表和回放
-- **安全告警系统**：后方来车告警、心率超限告警、疲劳提醒
-- **用户配置管理**：心率上限、年龄体重、BLE 白名单等
+### P1 — 数据持久化与安全（全部完成）
+- **~~本地 FIT/GPX 文件存储~~** ✅ 已完成 — `persistence/ride_repository.py`
+- **~~骑行会话管理~~** ✅ 已完成 — `services/ride_service.py`（开始/暂停/结束/统计）
+- **~~历史记录页面~~** ✅ 已完成 — `ui/history_page.py`（列表 + 轨迹回放）
+- **~~安全告警系统~~** ✅ 已完成 — `services/alert_service.py`（后方来车/心率/疲劳/跌倒）
+- **~~用户配置管理~~** ✅ 已完成 — `persistence/config_manager.py` + `ui/settings_page.py`
 
 ### P2 — 离线智能增强
 - **离线地图瓦片**：OpenStreetMap + MBTiles，替代高德在线地图
@@ -99,76 +108,59 @@
 
 ```
 qt_project/
-├── main.py                      # 入口，仅剩 BikeComputerPro 主窗口逻辑
-├── app.py                       # [待建] QApplication + 全局异常处理
+├── main.py                      # 入口，BikeComputerPro 主窗口逻辑
 │
 ├── ui/                          # UI 页面层
 │   ├── ui_main_window.py
-│   ├── map_page.py              # 现有
-│   ├── smart_pinyin_ime.py      # 现有
-│   ├── styles.qss               # [待建] 统一 QSS 样式
-│   ├── history_page.py          # [待建] 历史记录页
-│   └── settings_page.py         # [待建] 设置页
+│   ├── smart_pinyin_ime.py      # 智能拼音输入法
+│   ├── history_page.py          # 历史记录页（列表 + 轨迹回放）
+│   ├── settings_page.py         # 系统设置页（心率阈值/告警开关）
+│   └── styles.qss               # [待建] 统一 QSS 样式
 │
 ├── widgets/                     # 可复用控件
-│   ├── map_widget.py            # 现有
-│   ├── circle_gauge.py          # 现有（从 main.py 拆分）
-│   ├── small_data_box.py        # 现有（从 main.py 拆分）
-│   ├── metric_card.py           # [待建]
-│   └── message_bubble.py        # [待建]
+│   ├── map_widget.py            # 高德地图组件（位置标记 + 航向箭头 + 导航）
+│   ├── circle_gauge.py          # 圆形仪表盘（速度/功率）
+│   ├── metric_card.py           # 传感器数据卡片
+│   └── message_bubble.py        # [待建] 消息气泡
 │
-├── services/                    # 业务服务层 [待建]
-│   ├── map_service.py           # 现有
-│   ├── comm_service.py          # 现有
-│   ├── ride_service.py          # [待建] 骑行会话管理
-│   ├── alert_service.py         # [待建] 安全告警
-│   ├── nav_engine.py            # [待建] 离线导航
-│   └── ai_assistant.py          # [待建] AI Agent（升级 ollama_client）
+├── services/                    # 业务服务层
+│   ├── comm_service.py          # BLE + WiFi 统一调度
+│   ├── ride_service.py          # 骑行会话管理（开始/暂停/结束/统计）
+│   ├── alert_service.py         # 安全告警（后方来车/心率/疲劳/跌倒）
+│   ├── nav_engine.py            # [待建] 离线导航引擎
+│   └── ai_assistant.py          # [待建] AI Agent
 │
 ├── core/                        # 核心领域层
-│   ├── data_context.py          # 现有
-│   ├── location_service.py      # 现有
-│   ├── protocol.py              # 现有
-│   ├── models.py                # [待建] RideRecord, GPSPoint 等
+│   ├── data_context.py          # 全局骑行数据上下文
+│   ├── location_service.py      # 离线省份判断
+│   ├── protocol.py              # 统一数据协议（SensorData / AppCommand）
 │   └── calculator.py            # [待建] 骑行指标计算
 │
 ├── drivers/                     # 硬件驱动层
-│   ├── serial_handler.py        # 现有
-│   ├── ble_server.py            # 现有（RFCOMM 经典蓝牙）
-│   ├── ble_central.py           # [待建] BLE Central 连外设
-│   ├── wifi_server.py           # 现有
+│   ├── serial_handler.py        # STM32 串口读取
+│   ├── ble_server.py            # 经典蓝牙 RFCOMM Server
+│   ├── wifi_server.py           # WebSocket Server
 │   └── audio/                   # 语音子模块
-│       ├── voice_recorder.py    # 现有
-│       ├── piper_voice.py       # 现有
-│       ├── voice_final.py       # 现有
-│       └── asr_whisper.py       # [待建] 本地 ASR
+│       ├── voice_recorder.py    # 按钮语音助手（GPIO 17）
+│       ├── piper_voice.py       # HybridVoicePlayer（Piper + Edge-TTS）
+│       └── voice_final.py       # 语音最终播放
 │
-├── persistence/                 # 持久化层 [待建]
+├── persistence/                 # 持久化层
 │   ├── ride_repository.py       # FIT/GPX 读写
-│   ├── config_manager.py        # 配置管理
-│   ├── buffer_queue.py          # 现有
-│   └── tile_cache_manager.py    # 离线瓦片管理
+│   ├── config_manager.py        # 用户配置管理
+│   └── buffer_queue.py          # 断连缓存队列
 │
 ├── llm/                         # 大模型层
-│   ├── ollama_client.py         # 现有
+│   ├── ollama_client.py         # Ollama 客户端（自动选模型 + 流式输出）
 │   └── prompts.py               # [待建] 提示词模板
 │
 ├── utils/                       # 工具类
-│   └── serial_debugger.py       # 现有（从 main.py 拆分）
-│
-├── scripts/                     # 运维脚本
-│   ├── download_tiles.py        # [待建] 瓦片预下载
-│   ├── setup_piper.sh           # 现有
-│   ├── setup_piper_hq.sh        # 现有
-│   ├── setup_melotts.sh         # 现有
-│   └── download_piper_model.sh  # 现有
+│   └── serial_debugger.py       # 串口日志重定向
 │
 └── tests/                       # 测试
-    ├── test_data_context.py     # 现有
-    ├── test_navigation.py       # 现有
-    ├── test_voice_system.py     # 现有
-    ├── test_nav_console.py      # 现有
-    ├── test_nav_simple.py       # 现有
+    ├── test_data_context.py
+    ├── test_navigation.py
+    ├── test_voice_system.py
     └── ...
 ```
 
@@ -179,19 +171,41 @@ qt_project/
 ### STM32 → 树莓派（当前 JSON 格式）
 ```json
 {
-  "speed": 25.5,
-  "power": 180,
-  "cadence": 85,
-  "distance": 12.3,
-  "ride_time": 1800,
-  "slope": 2.5,
-  "temperature": 28,
+  "speed": 25.4,
+  "cadence": 90,
+  "power": 220,
+  "distance": 15.25,
+  "ride_time": 3600,
+  "slope": 3.5,
+  "zt_flag": 5,
+  "yaw": 60,
+  "temperature": 26.5,
   "heart_rate": 145,
-  "rear_dist": 8.5,
-  "location": {"lat": 39.9, "lon": 116.4},
-  "err_code": 0
+  "rear_dist": 12.5,
+  "err_code": 0,
+  "location": {
+    "lat": 31.230416,
+    "lon": 121.473701
+  }
 }
 ```
+
+字段说明：
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `speed` | float | 速度 km/h |
+| `cadence` | float | 踏频 rpm |
+| `power` | float | 功率 W |
+| `distance` | float | 骑行距离 km |
+| `ride_time` | int | 骑行时间秒 |
+| `slope` | float | 坡度 % |
+| `zt_flag` | int | 骑行状态：0=跌倒 1=右转弯 2=左转弯 3=上坡 4=下坡 5=正常骑行 |
+| `yaw` | float | IMU 航偏角，0°指北，顺时针增加 |
+| `temperature` | float | 温度 °C |
+| `heart_rate` | float | 心率 bpm |
+| `rear_dist` | float | 后方来车距离 m |
+| `err_code` | int | 错误码（0=正常） |
+| `location` | object | GPS 坐标 {lat, lon} |
 
 ### 树莓派 ↔ App（已实现）
 - **BLE 通道**：经典蓝牙 RFCOMM，发送 18 字节紧凑二进制 + JSON 事件
