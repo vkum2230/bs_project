@@ -651,9 +651,10 @@ class ButtonVoiceAssistant:
                     except Exception as e:
                         print(f"[ButtonVoiceAssistant] 本地处理失败: {e}")
                     
-                    # 非数据查询问题，走大模型（不传递骑行数据）
+                    # 非数据查询问题，走大模型
                     print(f"[ButtonVoiceAssistant] 调用大模型: {clean_text}")
-                    
+                    print(f"[ButtonVoiceAssistant] 客户端类型: {type(self.ollama_client).__name__}")
+
                     system_prompt = "你是骑行助手小智。简洁回答，无Markdown。每次回复严格控制在100字以内，务必完整收尾，绝不截断。"
                     enhanced_prompt = clean_text
 

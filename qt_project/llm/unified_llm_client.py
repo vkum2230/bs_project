@@ -47,10 +47,13 @@ class UnifiedLLMClient:
         try:
             from core.data_context import get_data_context
             ctx = get_data_context()
-            ride_prompt = ctx.get_system_prompt_with_context(base_prompt=system_prompt)
+            ride_prompt = ctx.get_system_prompt_with_context(base_prompt=system_prompt, all_fields=True)
+            print(f"[UnifiedLLM] 注入骑行数据后的 system prompt: {ride_prompt[:150]}...")
             return ride_prompt
         except Exception as e:
             print(f"[UnifiedLLM] 注入骑行数据失败: {e}")
+            import traceback
+            traceback.print_exc()
             return system_prompt or "你是骑行助手小智。"
 
     def chat(self, prompt: str, system_prompt: str = None,

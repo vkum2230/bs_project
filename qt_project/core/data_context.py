@@ -30,42 +30,46 @@ class RideData:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
     
-    def to_context_string(self) -> str:
-        """转换为自然语言描述"""
+    def to_context_string(self, all_fields: bool = False) -> str:
+        """转换为自然语言描述
+
+        Args:
+            all_fields: 为 True 时包含所有字段（包括 0 值）
+        """
         parts = []
-        
-        if self.speed > 0:
+
+        if all_fields or self.speed > 0:
             parts.append(f"当前速度{self.speed:.1f}公里每小时")
-        if self.power > 0:
+        if all_fields or self.power > 0:
             parts.append(f"功率{self.power:.0f}瓦")
-        if self.cadence > 0:
+        if all_fields or self.cadence > 0:
             parts.append(f"踏频{self.cadence:.0f}转每分钟")
-        if self.distance > 0:
+        if all_fields or self.distance > 0:
             parts.append(f"已骑行{self.distance:.1f}公里")
-        if self.ride_time > 0:
+        if all_fields or self.ride_time > 0:
             hours = self.ride_time // 3600
             minutes = (self.ride_time % 3600) // 60
             if hours > 0:
                 parts.append(f"骑行时间{hours}小时{minutes}分钟")
             else:
                 parts.append(f"骑行时间{minutes}分钟")
-        if self.slope != 0:
+        if all_fields or self.slope != 0:
             prefix = "上坡" if self.slope > 0 else "下坡"
             parts.append(f"{prefix}坡度{abs(self.slope):.1f}%")
-        if self.posture != 0:
+        if all_fields or self.posture != 0:
             parts.append("注意骑行姿态异常")
-        if self.temperature > 0:
+        if all_fields or self.temperature > 0:
             parts.append(f"环境温度{self.temperature:.1f}摄氏度")
-        if self.heart_rate > 0:
+        if all_fields or self.heart_rate > 0:
             parts.append(f"心率{self.heart_rate:.0f}次每分钟")
-        if self.rear_dist > 0:
+        if all_fields or self.rear_dist > 0:
             if self.rear_dist < 5:
                 parts.append(f"后方有车辆接近，距离仅{self.rear_dist:.1f}米，请注意安全")
             else:
                 parts.append(f"后方车辆距离{self.rear_dist:.1f}米")
         if self.location:
             parts.append(f"当前位置在{self.location}")
-        
+
         if parts:
             return "当前骑行数据：" + "，".join(parts) + "。"
         return "暂无骑行数据。"
@@ -132,14 +136,14 @@ class DataContextManager:
         """注册数据更新回调"""
         self._callbacks.append(callback)
     
-    def get_system_prompt_with_context(self, base_prompt: str = None) -> str:
+    def get_system_prompt_with_context(self, base_prompt: str = None, all_fields: bool = True) -> str:
         """
         生成带数据上下文的系统提示词
         """
-        context = self.get_context_string()
-        
+        context = self.get_context_string(all_fields=all_fields)
+
         base = base_prompt or "你是骑行助手小智，一个专业的骑行导航助手。"
-        
+
         return f"""{base}
 
 {context}

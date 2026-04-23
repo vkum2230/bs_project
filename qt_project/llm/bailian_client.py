@@ -109,10 +109,12 @@ class BailianClient:
         def _do_stream():
             full_response = ""
             try:
+                messages = self._build_messages(prompt, system_prompt)
+                print(f"[BailianClient] 请求消息: {json.dumps(messages, ensure_ascii=False)}")
                 print(f"[BailianClient] 开始流式请求，模型: {self.model}, 提示: {prompt[:30]}...")
                 data = {
                     "model": self.model,
-                    "messages": self._build_messages(prompt, system_prompt),
+                    "messages": messages,
                     "stream": True,
                     "max_tokens": max_tokens,
                     "temperature": 0.5,
