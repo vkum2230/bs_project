@@ -37,6 +37,8 @@ class ConfigManager:
         "aliyun_tts_api_key": "sk-c6ec991c7d9d4fba8c95803fe55b47e6",
         "aliyun_tts_voice": "Maia",
         "aliyun_tts_model": "qwen3-tts-flash",
+        "aliyun_bailian_api_key": "sk-77b02cb7cc3448509e84cc5b005ea87a",
+        "aliyun_bailian_model": "qwen-turbo",
         "last_online_mode": True,  # True=online, False=offline
     }
 

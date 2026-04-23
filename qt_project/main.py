@@ -25,6 +25,8 @@ from utils.serial_debugger import SerialDebugger
 from drivers.audio import VoicePlayer, LEDController
 from drivers.audio.voice_recorder import ButtonVoiceAssistant
 from llm.ollama_client import OllamaClient, DEFAULT_SYSTEM_PROMPT
+from llm.bailian_client import BailianClient
+from llm.unified_llm_client import UnifiedLLMClient
 from core.protocol import SensorData, RideSessionState, RideSummary
 from services.comm_service import CommService
 from persistence.config_manager import get_config
@@ -88,7 +90,8 @@ class BikeComputerPro(QWidget):
             from drivers.audio.piper_voice import HybridVoicePlayer
             self.voice_player = HybridVoicePlayer(
                 voice='xiaoxiao',
-                message_callback=self.add_voice_message  # 传入消息回调，播报时自动显示
+                message_callback=self.add_voice_message,  # 传入消息回调，播报时自动显示
+                force_offline=not self._global_online_mode
             )
             print("[Main] 混合语音播放器初始化成功（支持离线）")
             voice_initialized = True
@@ -187,7 +190,7 @@ class BikeComputerPro(QWidget):
         except Exception as e:
             print(f"[Main] LED 控制器初始化失败: {e}")
         
-        # 初始化 Ollama 大模型客户端
+        # 初始化 Ollama 本地大模型客户端
         self.ollama_client = None
         try:
             self.ollama_client = self._init_ollama_client()
@@ -195,7 +198,30 @@ class BikeComputerPro(QWidget):
             print(f"[Main] Ollama 客户端初始化失败: {e}")
             import traceback
             traceback.print_exc()
-        
+
+        # 初始化百炼在线大模型客户端
+        self.bailian_client = None
+        try:
+            bailian_key = self.config.get("aliyun_bailian_api_key")
+            bailian_model = self.config.get("aliyun_bailian_model", "qwen-turbo")
+            self.bailian_client = BailianClient(api_key=bailian_key, model=bailian_model)
+            if self.bailian_client.check_available():
+                print(f"[Main] 百炼在线模型初始化成功（模型: {bailian_model}）")
+            else:
+                print("[Main] 百炼服务暂不可达，在线 LLM 将不可用")
+        except Exception as e:
+            print(f"[Main] 百炼客户端初始化失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # 统一大模型客户端（自动切换在线/离线）
+        self.unified_llm = UnifiedLLMClient(
+            bailian_client=self.bailian_client,
+            ollama_client=self.ollama_client,
+            force_offline=not self._global_online_mode
+        )
+        print("[Main] 统一大模型客户端已初始化")
+
         # 按钮语音助手（按住说话功能）
         self.voice_assistant = None
         if self.voice_player:
@@ -204,10 +230,10 @@ class BikeComputerPro(QWidget):
                     voice_player=self.voice_player,
                     message_callback=self.add_voice_message,
                     button_pin=17,
-                    ollama_client=self.ollama_client,  # 传入大模型客户端
+                    ollama_client=self.unified_llm,  # 传入统一大模型客户端
                     led_controller=self.led_controller  # 传入 LED 控制器
                 )
-                print("[Main] 按钮语音助手初始化成功（已集成大模型）")
+                print("[Main] 按钮语音助手初始化成功（已集成统一大模型）")
                 print("[Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）")
             except Exception as e:
                 print(f"[Main] 按钮语音助手初始化失败: {e}")
@@ -1003,6 +1029,16 @@ class BikeComputerPro(QWidget):
 
         new_mode = "online" if online else "offline"
         self.page_map.set_mode(new_mode)
+
+        # 同步语音播放器离线状态
+        if self.voice_player and hasattr(self.voice_player, 'force_offline'):
+            self.voice_player.force_offline = not online
+            print(f"[Main] 语音播放器 force_offline={not online}")
+
+        # 同步大模型客户端离线状态
+        if self.unified_llm:
+            self.unified_llm.force_offline = not online
+            print(f"[Main] 大模型客户端 force_offline={not online}")
 
         if online:
             # 手动切回在线时重置降级计数，允许下次再次自动降级

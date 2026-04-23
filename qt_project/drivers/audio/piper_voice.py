@@ -193,15 +193,17 @@ class HybridVoicePlayer:
     - 都失败：使用 espeak（保底）
     """
     
-    def __init__(self, voice: str = 'xiaoxiao', message_callback=None):
+    def __init__(self, voice: str = 'xiaoxiao', message_callback=None, force_offline: bool = False):
         """
         初始化混合播放器
-        
+
         Args:
             voice: Edge-TTS 语音选择
             message_callback: 消息回调
+            force_offline: 强制离线模式，不尝试任何网络请求
         """
         self._message_callback = message_callback
+        self.force_offline = force_offline
         self._online_player = None
         self._offline_player = None
         
@@ -287,9 +289,13 @@ class HybridVoicePlayer:
             with self._lock:
                 print(f"[HybridVoice] 开始播报: {text[:30]}...")
                 
-                # 先检查网络状态
-                has_network = self._check_network()
-                print(f"[HybridVoice] 网络状态: {'可用' if has_network else '不可用'}")
+                # 离线模式强制跳过网络检查
+                if self.force_offline:
+                    has_network = False
+                    print("[HybridVoice] 强制离线模式，跳过网络检查")
+                else:
+                    has_network = self._check_network()
+                    print(f"[HybridVoice] 网络状态: {'可用' if has_network else '不可用'}")
                 
                 # UI 回调统一在这里处理
                 if show_in_ui and self._message_callback:
