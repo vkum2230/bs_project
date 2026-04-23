@@ -64,7 +64,8 @@ class BikeComputerPro(QWidget):
         self._map_page_visited = False
 
         # 全局在线/离线状态管理
-        self._global_online_mode = self.config.get_last_online_mode()  # True=在线, False=离线
+        # 启动时始终先尝试在线状态，后续网络检测失败再自动切离线
+        self._global_online_mode = True
         self._auto_fallback_count = 0  # 自动降级次数（防循环）
 
         # ========== 本地瓦片服务器 ==========
@@ -803,13 +804,9 @@ class BikeComputerPro(QWidget):
         self.voice_timer.singleShot(3000, self._play_welcome_voice)
         # ==================================
 
-        # 同步状态栏按钮样式到当前全局模式
-        if not self._global_online_mode:
-            self.btn_map_mode.setText("离线")
-            self.btn_map_mode.setStyleSheet(
-                "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 6px; }"
-                "QPushButton:pressed { background-color: #c0392b; }"
-            )
+        # 启动后 5 秒进行网络检测，无网则自动切离线
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(5000, self._verify_startup_network)
 
     def _init_ollama_client(self):
         """
@@ -1013,6 +1010,19 @@ class BikeComputerPro(QWidget):
             except Exception:
                 continue
         return False
+
+    def _verify_startup_network(self):
+        """启动后验证网络，无网络则自动切换至离线模式"""
+        if not self._global_online_mode:
+            return  # 已经是离线状态
+        if not self._check_network():
+            print("[Main] 启动检测：无网络，自动切换至离线模式")
+            # 标记为已降级，避免 _on_map_mode_changed 重复播报
+            self._auto_fallback_count = 1
+            self.set_global_online_mode(False)
+            self.add_voice_message("当前无网络，已切换至离线模式", icon="⚠️")
+            if self.voice_player:
+                self.voice_player.speak("当前无网络，已切换至离线模式", show_in_ui=False)
 
     def set_global_online_mode(self, online: bool, auto_fallback: bool = False):
         """设置全局在线/离线状态
