@@ -11,6 +11,17 @@ import urllib.request
 import urllib.parse
 import json
 
+try:
+    from services.nav_engine import NavEngine
+    _HAS_NAV_ENGINE = True
+except ImportError:
+    try:
+        from qt_project.services.nav_engine import NavEngine
+        _HAS_NAV_ENGINE = True
+    except ImportError:
+        _HAS_NAV_ENGINE = False
+        print("[警告] 离线导航引擎加载失败")
+
 # 导入智能拼音输入法
 try:
     from ui.smart_pinyin_ime import get_ime
@@ -34,36 +45,37 @@ except ImportError:
 
 class NavigationHandler(QObject):
     """导航指令处理器 - 接收 JS 端的导航回调"""
-    
+
     # 导航信号
     nav_started = pyqtSignal()  # 导航开始
     nav_stopped = pyqtSignal()  # 导航结束
     nav_instruction = pyqtSignal(str, str)  # 导航指令 (instruction, detail)
+    nav_overview = pyqtSignal(str)  # 导航总览播报文本
     nav_position_updated = pyqtSignal(float, float)  # 位置更新 (lat, lon)
     nav_error = pyqtSignal(str)  # 导航错误
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_step = 0
         self._total_steps = 0
         self._last_instruction = ""
-    
+
     @pyqtSlot()
     def on_nav_started(self):
         """导航开始回调"""
         print("[NavigationHandler] 导航开始")
         self.nav_started.emit()
-    
+
     @pyqtSlot()
     def on_nav_stopped(self):
         """导航结束回调"""
         print("[NavigationHandler] 导航结束")
         self.nav_stopped.emit()
-    
+
     @pyqtSlot(str, str, int, int)
     def on_nav_instruction(self, instruction: str, detail: str, current_step: int, total_steps: int):
         """导航指令回调
-        
+
         Args:
             instruction: 导航指令文本（如"前方500米右转"）
             detail: 详细信息（如"剩余2.5公里|预计15分钟"）
@@ -72,24 +84,30 @@ class NavigationHandler(QObject):
         """
         self._current_step = current_step
         self._total_steps = total_steps
-        
+
         # 避免重复播报相同指令
         if instruction != self._last_instruction:
             self._last_instruction = instruction
             print(f"[NavigationHandler] 导航指令 [{current_step+1}/{total_steps}]: {instruction}")
             self.nav_instruction.emit(instruction, detail)
-    
+
+    @pyqtSlot(str)
+    def on_nav_overview(self, text: str):
+        """导航总览回调（在线地图导航开始时播报）"""
+        print(f"[NavigationHandler] 导航总览: {text}")
+        self.nav_overview.emit(text)
+
     @pyqtSlot(float, float)
     def on_position_updated(self, lat: float, lon: float):
         """位置更新回调"""
         self.nav_position_updated.emit(lat, lon)
-    
+
     @pyqtSlot(str)
     def on_nav_error(self, error_msg: str):
         """导航错误回调"""
         print(f"[NavigationHandler] 导航错误: {error_msg}")
         self.nav_error.emit(error_msg)
-    
+
     def reset(self):
         """重置导航状态"""
         self._current_step = 0
@@ -245,21 +263,87 @@ class AMapAPIHandler(QObject):
             print(f"[AMapAPI] 路线规划失败: {e}")
             return json.dumps({'status': '0', 'info': str(e)})
     
+    @pyqtSlot()
+    def report_route_planning_failed(self):
+        """报告在线路线规划失败，触发自动降级"""
+        parent = self.parent()
+        if parent and hasattr(parent, '_mode') and parent._mode == 'online':
+            print("[Map] 在线路线规划失败，建议自动降级到离线")
+            if hasattr(parent, 'route_planning_failed'):
+                parent.route_planning_failed.emit(True)
+
     @pyqtSlot(bool)
     def report_map_status(self, success):
         """报告地图加载状态
-        
+
         Args:
             success: 地图是否加载成功
         """
+        parent = self.parent()
+        if parent and hasattr(parent, '_map_html_loaded'):
+            parent._map_html_loaded = success
+        # 如果是模式切换导致的加载，跳过播报
+        if parent and hasattr(parent, '_skip_next_map_loaded') and parent._skip_next_map_loaded:
+            parent._skip_next_map_loaded = False
+            print(f"[Map] 地图加载{'成功' if success else '失败'} (模式切换，跳过播报)")
+            # 在线模式下加载失败，仍然触发降级
+            if not success and parent and hasattr(parent, '_mode') and parent._mode == 'online':
+                print("[Map] 在线地图加载失败，建议自动降级到离线")
+                if hasattr(parent, 'route_planning_failed'):
+                    parent.route_planning_failed.emit(True)
+            return
         if success:
             print(f"[Map] ✅ 地图加载成功!")
-            # 找到 MapWidget 并发出信号
-            parent = self.parent()
             if parent and hasattr(parent, 'map_loaded'):
                 parent.map_loaded.emit(True)
         else:
             print(f"[Map] ❌ 地图加载失败!")
+            if parent and hasattr(parent, 'map_loaded'):
+                parent.map_loaded.emit(False)
+            # 在线模式下加载失败，触发自动降级信号
+            if parent and hasattr(parent, '_mode') and parent._mode == 'online':
+                print("[Map] 在线地图加载失败，建议自动降级到离线")
+                if hasattr(parent, 'route_planning_failed'):
+                    parent.route_planning_failed.emit(True)
+
+    @pyqtSlot(float, float)
+    def set_offline_destination(self, lat: float, lon: float):
+        """离线模式：设置目的地标记（不立即导航）
+
+        Args:
+            lat: 目的地纬度
+            lon: 目的地经度
+        """
+        parent = self.parent()
+        if parent and hasattr(parent, '_set_offline_dest_js'):
+            parent._set_offline_dest_js(lat, lon)
+        print(f"[AMapAPI] 离线目的地已设置: {lat}, {lon}")
+
+    @pyqtSlot(float, float)
+    def plan_offline_route(self, lat: float, lon: float):
+        """离线模式：规划路线（不启动导航）
+
+        Args:
+            lat: 目的地纬度
+            lon: 目的地经度
+        """
+        parent = self.parent()
+        if parent and hasattr(parent, 'plan_offline_route'):
+            parent.plan_offline_route(lat, lon)
+        print(f"[AMapAPI] 离线路线规划: {lat}, {lon}")
+
+    @pyqtSlot(float, float)
+    def start_offline_navigation(self, lat: float, lon: float):
+        """离线模式：开始导航到指定坐标
+
+        Args:
+            lat: 目的地纬度
+            lon: 目的地经度
+        """
+        parent = self.parent()
+        if parent and hasattr(parent, 'start_navigation'):
+            parent.start_navigation(lat, lon)
+        print(f"[AMapAPI] 离线导航开始: {lat}, {lon}")
 
 
 class PinyinHandler(QObject):
@@ -715,28 +799,55 @@ class PinyinHandler(QObject):
 
 
 class MapWidget(QWidget):
-    """高德地图组件 - 右侧半透明键盘"""
-    
+    """地图组件 - 支持在线(高德)和离线(Leaflet)双模式"""
+
     nav_status_changed = pyqtSignal(str)
     nav_instruction = pyqtSignal(str)
     map_loaded = pyqtSignal(bool)  # 地图加载完成信号
+    mode_changed = pyqtSignal(str)  # 模式切换信号 ('online'/'offline')
+    route_planning_failed = pyqtSignal(bool)  # 路线规划失败，bool 表示是否建议自动降级
 
-    def __init__(self, 
+    def __init__(self,
                  amap_key="8b657a470f4b69e82bf81f72b3a2b3c0",  # Web服务 API Key
                  jsapi_key="c507e554a5bb6e08b7097fa61164f0e4",   # JS API Key
                  security_key="8ee0cb41f7666cfd320749d269ab6121",  # 安全密钥
+                 tile_server_url="http://localhost:8766/{z}/{x}/{y}.png",
+                 mode="online",
                  parent=None):
         super().__init__(parent)
         self.amap_key = amap_key      # WebService API Key（用于地点搜索等）
         self.jsapi_key = jsapi_key    # JS API Key（用于地图加载）
         self.security_key = security_key  # JS API 安全密钥
+        self.tile_server_url = tile_server_url
+        self._mode = mode  # 'online' 或 'offline'
         self.current_lat = None
         self.current_lon = None
         self.is_navigating = False  # 是否正在导航
-        
+        self._map_html_loaded = False  # HTML 页面是否已成功加载
+        self._skip_next_map_loaded = False  # 切换模式时跳过地图加载播报
+
         self.pinyin_handler = PinyinHandler(self)
         self.navigation_handler = NavigationHandler(self)
+
+        # 离线导航引擎
+        self.nav_engine = NavEngine(parent=self) if _HAS_NAV_ENGINE else None
+        self._offline_nav_active = False
+        self._last_nav_instruction = ""
+        self._last_rel_dir = ""
+        if self.nav_engine:
+            self.nav_engine.route_planned.connect(self._on_route_planned)
+            self.nav_engine.route_failed.connect(self._on_route_failed)
+            self.nav_engine.nav_updated.connect(self._on_nav_updated)
+
         self.init_ui()
+
+    @property
+    def mode(self):
+        return self._mode
+
+    def is_map_loaded(self) -> bool:
+        """HTML 页面是否已成功加载"""
+        return self._map_html_loaded
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -744,40 +855,91 @@ class MapWidget(QWidget):
         main_layout.setSpacing(0)
 
         self.web_view = QWebEngineView()
-        
+
         # 配置 WebEngine
         from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineProfile
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.FocusOnNavigationEnabled, False)
         settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
-        
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+
         # 配置页面禁用缓存（开发调试用）
         self.web_view.page().profile().setHttpCacheType(QWebEngineProfile.NoCache)
-        
+
         self.channel = QWebChannel()
         self.channel.registerObject('pinyinHandler', self.pinyin_handler)
-        
+
         # 注册高德地图 API 处理后端
         self.amap_api_handler = AMapAPIHandler(self.amap_key, self)
         self.channel.registerObject('amapAPI', self.amap_api_handler)
-        
+
         # 注册导航处理器
         self.channel.registerObject('navHandler', self.navigation_handler)
-        
+
         self.web_view.page().setWebChannel(self.channel)
-        
+
         main_layout.addWidget(self.web_view)
-        self.load_amap()
-        
+        self.load_map()
+
         self.nav_timer = QTimer(self)
         self.nav_timer.timeout.connect(self.check_navigation_status)
         self.nav_timer.start(1000)
 
-    def load_amap(self):
-        """加载高德地图"""
-        html_content = self.generate_amap_html()
-        self.web_view.setHtml(html_content)
+    def set_mode(self, mode: str):
+        """切换地图模式
+
+        Args:
+            mode: 'online' 或 'offline'
+        """
+        if mode not in ('online', 'offline'):
+            print(f"[MapWidget] 无效模式: {mode}")
+            return
+
+        if self._mode == mode:
+            return
+
+        self._mode = mode
+        print(f"[MapWidget] 切换地图模式: {mode}")
+        # 切换模式时清理离线导航状态
+        self._offline_nav_active = False
+        self._last_nav_instruction = ""
+        self._last_rel_dir = ""
+        if self.nav_engine:
+            self.nav_engine.clear()
+        self._skip_next_map_loaded = True  # 标记：模式切换导致的加载，跳过播报
+        self.load_map()
+        self.mode_changed.emit(mode)
+
+    def load_map(self):
+        """加载地图（根据当前模式选择在线或离线）"""
+        from PyQt5.QtCore import QUrl
+        if self._mode == 'offline':
+            html_content = self.generate_offline_html()
+            title = "离线地图"
+        else:
+            html_content = self.generate_amap_html()
+            title = "高德骑行地图"
+
+        # 使用本地目录作为 base URL，使 leaflet/ 等相对路径可用
+        # map_widget.py 位于 widgets/ 子目录，其上级目录即为 qt_project/
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_url = QUrl.fromLocalFile(base_path + os.sep)
+
+        # 调试：保存离线 HTML 到文件便于排查
+        if self._mode == 'offline':
+            debug_path = os.path.join(base_path, 'offline_map_debug.html')
+            try:
+                with open(debug_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                print(f"[MapWidget] 离线地图调试文件已保存: {debug_path}")
+            except Exception as e:
+                print(f"[MapWidget] 保存调试文件失败: {e}")
+
+        print(f"[MapWidget] 正在加载 {title}, base_url={base_url.toString()}, html_len={len(html_content)}")
+        self.web_view.setHtml(html_content, base_url)
+        print(f"[MapWidget] 已加载 {title}")
 
     def generate_amap_html(self):
         """生成地图 HTML - 右侧半透明键盘"""
@@ -807,23 +969,21 @@ class MapWidget(QWidget):
             top: 8px;
             left: 8px;
             right: 8px;
-            background: rgba(30, 30, 30, 0.98);
-            border-radius: 12px;
-            padding: 10px;
             z-index: 2000;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }}
-        
+
         .input-row {{
             display: flex;
             gap: 8px;
             align-items: center;
         }}
-        
+
         .search-input {{
-            flex: 1;
-            background: #2a2a2a;
-            color: #fff;
+            width: 420px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: #000;
             border: 2px solid #4DB8FF;
             border-radius: 10px;
             padding: 12px 15px;
@@ -858,7 +1018,41 @@ class MapWidget(QWidget):
         
         .btn-stop {{ background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 12px; display: none; }}
         .btn-clear {{ background: linear-gradient(135deg, #666, #555); padding: 12px; }}
-        
+
+        /* 展开/收起按钮 */
+        .btn-toggle {{
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 48px;
+            transition: all 0.1s;
+            min-width: 48px;
+        }}
+        .btn-toggle:active {{ transform: scale(0.95); }}
+
+        /* 按钮面板 —— 默认收起在 》》 按钮后方 */
+        .btn-slide-group {{
+            display: flex;
+            gap: 8px;
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            align-items: center;
+            pointer-events: none;
+            white-space: nowrap;
+        }}
+        .btn-slide-group.show {{
+            max-width: 600px;
+            opacity: 1;
+            pointer-events: auto;
+        }}
+
         /* 地图控制按钮（右上角） */
         /* 地图缩放按钮（右侧中间） */
         .zoom-controls {{
@@ -891,20 +1085,6 @@ class MapWidget(QWidget):
             background: #4DB8FF; 
             color: white; 
             transform: scale(0.95);
-        }}
-        
-        /* 位置信息 */
-        .location-info {{
-            position: absolute;
-            top: 75px;
-            left: 8px;
-            background: rgba(30, 30, 30, 0.95);
-            color: #4DB8FF;
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1.5px solid #4DB8FF;
-            font-size: 12px;
-            z-index: 1000;
         }}
         
         /* 触摸手势提示 */
@@ -942,7 +1122,7 @@ class MapWidget(QWidget):
         /* ========== 右侧半透明键盘 ========== */
         .keyboard-wrapper {{
             position: fixed;
-            bottom: 90px;
+            bottom: 10px;
             right: 10px;
             width: 480px;
             z-index: 3000;
@@ -1188,23 +1368,18 @@ class MapWidget(QWidget):
         <div style="position: relative;">
             <div class="input-row">
                 <input type="text" id="searchInput" class="search-input" placeholder="点击输入目的地..." readonly onclick="showKeyboard()">
-                <button class="btn btn-route" onclick="planRoute()" title="规划路线">🗺️ 路线</button>
-                <button class="btn btn-nav" onclick="enterNavMode()" title="导航模式">🧭 导航</button>
-                <button class="btn btn-locate" onclick="showCurrentLocation()" title="当前位置">📍</button>
-                <button class="btn btn-stop" onclick="stopNavigation()" title="停止">⏹️</button>
-                <button class="btn btn-clear" onclick="clearAll()" title="清除">🗑️</button>
+                <button class="btn btn-toggle" onclick="toggleBtnPanel()" title="展开/收起">》》</button>
+                <div id="btnPanel" class="btn-slide-group">
+                    <button class="btn btn-route" onclick="planRoute()" title="规划路线">🗺️ 路线</button>
+                    <button class="btn btn-nav" onclick="enterNavMode()" title="导航模式">🧭 导航</button>
+                    <button class="btn-zoom" onclick="zoomIn()" title="放大">+</button>
+                    <button class="btn-zoom" onclick="zoomOut()" title="缩小">−</button>
+                    <button class="btn btn-locate" onclick="showCurrentLocation()" title="当前位置">📍</button>
+                    <button class="btn btn-clear" onclick="clearAll()" title="清除">🗑️</button>
+                </div>
             </div>
             <div id="suggestionsList" class="suggestions-list"></div>
         </div>
-    </div>
-    
-    <!-- 位置信息 -->
-    <div class="location-info" id="locationInfo">📍 等待GPS...</div>
-    
-    <!-- 地图缩放按钮（右侧中间） -->
-    <div class="zoom-controls">
-        <button class="btn-zoom" onclick="zoomIn()" title="放大">+</button>
-        <button class="btn-zoom" onclick="zoomOut()" title="缩小">−</button>
     </div>
     
     <!-- 导航面板 - 键盘左侧 -->
@@ -1331,6 +1506,7 @@ class MapWidget(QWidget):
                 new QWebChannel(qt.webChannelTransport, function(channel) {{
                     amapAPI = channel.objects.amapAPI;
                     pinyinHandler = channel.objects.pinyinHandler;
+                    navHandler = channel.objects.navHandler;
                     console.log('QWebChannel 连接成功, amapAPI:', amapAPI ? '可用' : '不可用');
                     
                     // 绑定需要 API 的地图事件
@@ -1338,7 +1514,6 @@ class MapWidget(QWidget):
                 }});
             }} else {{
                 console.error('QWebChannel 未就绪');
-                document.getElementById('locationInfo').innerHTML = '⚠️ API未连接';
             }}
 
             // 点击键盘外部区域隐藏键盘（第一次点击生效）
@@ -1362,7 +1537,7 @@ class MapWidget(QWidget):
                 
                 map = new AMap.Map('container', {{
                     zoom: 16,
-                    center: [114.057868, 22.543099],
+                    center: [112.944, 27.828],
                     viewMode: '2D',
                     mapStyle: 'amap://styles/dark'
                 }});
@@ -1415,14 +1590,13 @@ class MapWidget(QWidget):
                 var location = lng + ',' + lat;
                 
                 console.log('点击位置:', location);
-                document.getElementById('locationInfo').innerHTML = '📍 正在获取地址...';
-                
+
                 // QWebChannel 返回 Promise
                 amapAPI.geocode_regeo(location).then(function(result) {{
                     try {{
                         var data = JSON.parse(result);
                         console.log('逆地理编码结果:', data);
-                        
+
                         if (data.status === '1' && data.regeocode) {{
                             var address = data.regeocode.formatted_address;
                             var comp = data.regeocode.addressComponent;
@@ -1432,26 +1606,15 @@ class MapWidget(QWidget):
                             var number = (comp.streetNumber && typeof comp.streetNumber === 'string') ? comp.streetNumber : '';
                             var shortAddress = district + street + number;
                             if (!shortAddress) shortAddress = address;
-                            
-                            document.getElementById('locationInfo').innerHTML = 
-                                '📍 ' + shortAddress + '<br>' +
-                                lng.toFixed(5) + ',' + lat.toFixed(5);
-                            
+
                             addTempMarker(e.lnglat, shortAddress);
                             document.getElementById('searchInput').value = shortAddress;
-                        }} else {{
-                            document.getElementById('locationInfo').innerHTML = 
-                                '📍 无法获取地址<br>' + lng.toFixed(5) + ',' + lat.toFixed(5);
                         }}
                     }} catch(e) {{
                         console.error('解析失败:', e);
-                        document.getElementById('locationInfo').innerHTML = 
-                            '📍 解析失败<br>' + lng.toFixed(5) + ',' + lat.toFixed(5);
                     }}
                 }}).catch(function(err) {{
                     console.error('请求失败:', err);
-                    document.getElementById('locationInfo').innerHTML = 
-                        '📍 请求失败<br>' + lng.toFixed(5) + ',' + lat.toFixed(5);
                 }});
                 
                 hideKeyboard();
@@ -1503,19 +1666,30 @@ class MapWidget(QWidget):
             if (navMonitorTimer) {{
                 clearInterval(navMonitorTimer);
             }}
-            
+
             currentNavStep = 0;
-            
-            // 通知 Python 端导航开始
-            if (typeof navHandler !== 'undefined' && navHandler) {{
-                navHandler.on_nav_started();
+
+            // 播报总览信息（全程距离 + 预计时间 + 方向）
+            if (routeInfo && navSteps.length > 0) {{
+                var totalDist = routeInfo.distance;
+                var totalTime = routeInfo.time;
+                var firstStep = navSteps[0];
+                var firstInstr = firstStep.instruction ? firstStep.instruction.replace(/<[^>]+>/g, '') : '';
+
+                var overviewParts = ['开始骑行'];
+                if (totalDist > 0) overviewParts.push('全程' + formatDist(totalDist));
+                if (totalTime > 0) overviewParts.push('预计' + formatTime(totalTime));
+                // 相对方向（Python 端传入）
+                if (window._navRelDir) overviewParts.push('骑行路线在你的' + window._navRelDir);
+                if (firstInstr) overviewParts.push(firstInstr);
+
+                var overviewText = overviewParts.join('，');
+                console.log('[Navigation] 总览播报:', overviewText);
+                if (typeof navHandler !== 'undefined' && navHandler) {{
+                    navHandler.on_nav_overview(overviewText);
+                }}
             }}
-            
-            // 播报第一条指令
-            if (navSteps.length > 0) {{
-                announceNavStep(0);
-            }}
-            
+
             console.log('[Navigation] 开始导航监控，共', navSteps.length, '步');
         }}
         
@@ -1539,24 +1713,31 @@ class MapWidget(QWidget):
         // 播报导航步骤
         function announceNavStep(stepIndex) {{
             if (stepIndex >= navSteps.length) return;
-            
+
             var step = navSteps[stepIndex];
             var instruction = step.instruction;
-            
+
             // 清理 HTML 标签
             instruction = instruction.replace(/<[^>]+>/g, '');
-            
+
             var detail = '剩余' + formatDist(routeInfo.distance) + '|预计' + formatTime(routeInfo.time);
-            
-            console.log('[Navigation] 播报步骤', stepIndex + 1, ':', instruction);
-            
+
+            // 构造带距离的友好播报文本
+            var stepDist = step.distance || 0;
+            var speakText = instruction;
+            if (stepDist > 0 && stepIndex < navSteps.length - 1) {{
+                speakText = '前方' + formatDist(stepDist) + '，' + instruction;
+            }}
+
+            console.log('[Navigation] 播报步骤', stepIndex + 1, ':', speakText);
+
             // 更新 UI
             document.getElementById('navInstruction').textContent = instruction;
             document.getElementById('navDetail').textContent = detail;
-            
-            // 通知 Python 端
+
+            // 通知 Python 端（发送带距离的友好文本）
             if (typeof navHandler !== 'undefined' && navHandler) {{
-                navHandler.on_nav_instruction(instruction, detail, stepIndex, navSteps.length);
+                navHandler.on_nav_instruction(speakText, detail, stepIndex, navSteps.length);
             }}
         }}
         
@@ -2118,7 +2299,7 @@ class MapWidget(QWidget):
                 var btn = document.createElement('button');
                 btn.className = 'candidate-item';
                 btn.textContent = ch;
-                btn.onclick = function() {{ selectCandidate(ch); }};
+                btn.onclick = function(e) {{ e.stopPropagation(); selectCandidate(ch); }};
                 candidatesDiv.appendChild(btn);
             }});
             
@@ -2134,7 +2315,7 @@ class MapWidget(QWidget):
             prevBtn.className = 'candidate-item more-btn';
             prevBtn.textContent = '<<';
             if (currentPage > 0) {{
-                prevBtn.onclick = function() {{ 
+                prevBtn.onclick = function(e) {{ e.stopPropagation();
                     fetchCandidates(currentCandidatePage - 1);
                 }};
             }} else {{
@@ -2148,7 +2329,7 @@ class MapWidget(QWidget):
             moreBtn.className = 'candidate-item more-btn';
             moreBtn.textContent = '>>';
             if (hasMore) {{
-                moreBtn.onclick = function() {{ 
+                moreBtn.onclick = function(e) {{ e.stopPropagation();
                     fetchCandidates(currentCandidatePage + 1);
                 }};
             }} else {{
@@ -2230,7 +2411,12 @@ class MapWidget(QWidget):
             document.getElementById('keyboard').classList.remove('active');
             document.getElementById('suggestionsList').style.display = 'none';
         }}
-        
+
+        function toggleBtnPanel() {{
+            var panel = document.getElementById('btnPanel');
+            panel.classList.toggle('show');
+        }}
+
         function showSuggestions(tips) {{
             var list = document.getElementById('suggestionsList');
             list.innerHTML = '';
@@ -2306,13 +2492,8 @@ class MapWidget(QWidget):
                     map.setZoom(16);
                 }}
                 
-                // 更新位置信息显示
                 var addr = tip.district || '';
                 if (tip.address) addr += (addr ? ' ' : '') + tip.address;
-                document.getElementById('locationInfo').innerHTML = 
-                    '🎯 目的地: ' + tip.name + '<br>' +
-                    (addr ? '📍 ' + addr + '<br>' : '') +
-                    destPos[0].toFixed(5) + ',' + destPos[1].toFixed(5);
                 
                 console.log('选中目的地:', tip.name, destPos);
             }}
@@ -2370,9 +2551,11 @@ class MapWidget(QWidget):
             var path = wsData.route.paths[0];
             var steps = [];
             
-            // v5 API: duration 在 cost 对象内
+            // v5 API: duration 可能在 path.duration 或 path.cost.duration
             var totalDuration = 0;
-            if (path.cost && path.cost.duration) {{
+            if (path.duration) {{
+                totalDuration = parseInt(path.duration);
+            }} else if (path.cost && path.cost.duration) {{
                 totalDuration = parseInt(path.cost.duration);
             }}
             
@@ -2519,33 +2702,40 @@ class MapWidget(QWidget):
             window.routeArrowMarkers = [];
             
             if (!points || points.length < 2) return;
-            
-            // 使用 >> 符号作为箭头
-            var arrowContent = '<div style="font-size:14px;font-weight:bold;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.5);font-family:Arial,sans-serif;">&gt;&gt;</div>';
-            
+
             // 每隔一定点数添加一个箭头，确保分布均匀
             var step = Math.max(2, Math.floor(points.length / 10));
-            
+
             for (var i = step; i < points.length; i += step) {{
                 var p1 = points[i - 1];
                 var p2 = points[i];
-                
-                // 计算角度（0度指向北，顺时针增加）
-                var dx = p2[0] - p1[0];  // 经度差（东西方向）
-                var dy = p2[1] - p1[1];  // 纬度差（南北方向）
-                // Math.atan2(dx, dy) 给出从北方开始的角度
-                // 但 >> 默认指向东（右），需要减去90度来校正
-                var angle = Math.atan2(dx, dy) * 180 / Math.PI - 90;
-                
-                // 创建箭头标记
+
+                var dx = p2[0] - p1[0];
+                var dy = p2[1] - p1[1];
+
+                // 跳过重复点，避免角度无效
+                if (dx === 0 && dy === 0) continue;
+
+                // 计算 bearing（从北方向顺时针，0~360）
+                var bearing = Math.atan2(dx, dy) * 180 / Math.PI;
+                if (bearing < 0) bearing += 360;
+
+                // >> 默认指向东，需要逆时针转 90° 才能指向北
+                // CSS transform rotate 正角度为顺时针
+                var rotate = bearing - 90;
+
+                // 使用内联 CSS transform 直接控制旋转，不依赖 Marker.angle
+                var arrowContent = '<div style="font-size:14px;font-weight:bold;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.5);font-family:Arial,sans-serif;transform:rotate(' + rotate + 'deg);display:inline-block;">&gt;&gt;</div>';
+
+                // 创建箭头标记（angle 设为 0，旋转完全由 CSS 控制）
                 var marker = new AMap.Marker({{
                     position: new AMap.LngLat(p2[0], p2[1]),
                     content: arrowContent,
                     offset: new AMap.Pixel(-8, -8),
-                    angle: angle,
+                    angle: 0,
                     zIndex: 60
                 }});
-                
+
                 marker.setMap(map);
                 window.routeArrowMarkers.push(marker);
             }}
@@ -2555,53 +2745,61 @@ class MapWidget(QWidget):
         
         function doNavigate() {{
             console.log('开始导航:', 'currentPos=', currentPos, 'destPos=', destPos);
-            
+
             if (!currentPos) {{
                 showToast('⚠️ 等待GPS定位...', 'warning', 3000);
-                return;
+                return Promise.reject('无GPS');
             }}
             if (!destPos) {{
                 showToast('⚠️ 请先选择目的地', 'warning', 3000);
-                return;
+                return Promise.reject('无目的地');
             }}
             if (!amapAPI) {{
                 showToast('⚠️ API未就绪', 'error');
-                return;
+                return Promise.reject('API未就绪');
             }}
-            
+
             isNavigating = true;
             showToast('🗺️ 正在规划路线...', 'info', 2000);
-            
+
             // 使用 WebService API 进行路线规划
             var origin = currentPos[0] + ',' + currentPos[1];
             var destination = destPos[0] + ',' + destPos[1];
-            
+
             console.log('路线规划(WS):', origin, '->', destination);
-            
-            amapAPI.route_planning(origin, destination).then(function(result) {{
+
+            return amapAPI.route_planning(origin, destination).then(function(result) {{
                 try {{
                     var data = JSON.parse(result);
                     console.log('路线规划结果:', data);
-                    
+
                     if (data.status === '1' && data.route && data.route.paths && data.route.paths.length > 0) {{
                         // 转换 WebService 结果为 AMap 格式
                         var routeData = convertRouteData(data);
                         onRouteComplete(routeData);
+                        return Promise.resolve();
                     }} else {{
                         var info = data.info || '无法规划路线';
                         console.error('路线规划失败:', info);
                         showToast('路线规划失败: ' + info, 'error');
                         isNavigating = false;
+                        return Promise.reject(info);
                     }}
                 }} catch(e) {{
                     console.error('路线结果解析失败:', e);
                     showToast('路线解析失败', 'error');
                     isNavigating = false;
+                    return Promise.reject(e);
                 }}
             }}).catch(function(err) {{
                 console.error('路线规划请求失败:', err);
                 showToast('路线规划请求失败', 'error');
                 isNavigating = false;
+                // 通知 Python 端在线路线规划失败，建议自动降级
+                if (typeof amapAPI !== 'undefined' && amapAPI && amapAPI.report_route_planning_failed) {{
+                    amapAPI.report_route_planning_failed();
+                }}
+                return Promise.reject(err);
             }});
         }}
         
@@ -2620,25 +2818,17 @@ class MapWidget(QWidget):
             
             if (routeInfo && routeInfo.steps && routeInfo.steps.length > 0) {{
                 navSteps = routeInfo.steps;
-                
-                // 显示导航面板
-                var navPanel = document.getElementById('navPanel');
-                navPanel.style.display = 'block';
-                
-                // 显示第一条指令
+
+                // 仅保存数据、更新面板文本（不显示面板，不启动监控）
                 var step = routeInfo.steps[0];
                 var instruction = step.instruction ? step.instruction.replace(/<[^>]+>/g, '') : '开始导航';
-                
                 document.getElementById('navInstruction').textContent = instruction;
                 document.getElementById('navDetail').textContent = '剩余' + formatDist(routeInfo.distance) + '|预计' + formatTime(routeInfo.time);
-                
-                console.log('✅ 导航指令:', instruction);
+
+                console.log('✅ 路线规划完成:', instruction);
                 console.log('✅ 路线详情:', routeInfo.distance, '米,', routeInfo.time, '秒');
                 console.log('✅ 共', navSteps.length, '个步骤');
-                
-                // 开始导航监控
-                startNavMonitoring();
-                
+
                 showToast('✅ 路线规划成功', 'success', 2000);
             }} else {{
                 console.error('路线步骤为空');
@@ -2851,73 +3041,75 @@ class MapWidget(QWidget):
                 return;
             }}
 
-            // 开始导航
-            if (!isNavigating) {{
-                doNavigate();
-            }}
+            // 启动导航的公共逻辑（地图视图、标记等）
+            var startNavUI = function() {{
+                // 设置骑行导航级别的比例尺
+                var centerPos = currentPos || window.routeStartPos || map.getCenter();
+                map.setCenter(centerPos);
+                map.setZoom(18);
 
-            // 设置骑行导航级别的比例尺
-            var centerPos = currentPos || window.routeStartPos || map.getCenter();
-            map.setCenter(centerPos);
-            map.setZoom(18);
+                // 移除起点绿色圈（导航模式下起点就是当前位置）
+                if (window.startMarker) {{ map.remove(window.startMarker); window.startMarker = null; }}
 
-            // 移除起点绿色圈（导航模式下起点就是当前位置）
-            if (window.startMarker) {{
-                map.remove(window.startMarker);
-                window.startMarker = null;
-            }}
+                // 确保终点红色圈存在
+                if (!window.endMarker) {{
+                    window.endMarker = new AMap.Marker({{
+                        position: destPos,
+                        map: map,
+                        title: '终点',
+                        zIndex: 100,
+                        offset: new AMap.Pixel(-12, -12),
+                        content: '<div style="width: 24px; height: 24px; background: #f44336; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.5);"></div>'
+                    }});
+                }}
 
-            // 确保终点红色圈存在
-            if (!window.endMarker) {{
-                window.endMarker = new AMap.Marker({{
-                    position: destPos,
-                    map: map,
-                    title: '终点',
-                    zIndex: 100,
-                    offset: new AMap.Pixel(-12, -12),
-                    content: '<div style="width: 24px; height: 24px; background: #f44336; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.5);"></div>'
+                // 保留普通位置标记和航偏角箭头，只清理旧的蓝色导航箭头
+                if (window.navArrowMarker) {{ map.remove(window.navArrowMarker); window.navArrowMarker = null; }}
+
+                // 确保当前位置标记存在
+                if (currentPos && !currentMarker) {{
+                    currentMarker = new AMap.Marker({{
+                        position: currentPos,
+                        map: map,
+                        title: '当前位置',
+                        offset: new AMap.Pixel(-8, -8),
+                        content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
+                    }});
+                }}
+                if (currentPos && pendingYaw !== null && !yawMarker) {{ updateYaw(pendingYaw); }}
+
+                // 导航模式下用红色直线连接起点和终点（保留已有的规划路线）
+                if (window.navStraightLine) {{ map.remove(window.navStraightLine); }}
+                var startForNav = currentPos || window.routeStartPos || map.getCenter();
+                window.navStraightLine = new AMap.Polyline({{
+                    path: [startForNav, destPos],
+                    strokeColor: '#f44336',
+                    strokeWeight: 4,
+                    strokeOpacity: 0.9,
+                    lineJoin: 'round',
+                    zIndex: 99
                 }});
-            }}
+                window.navStraightLine.setMap(map);
 
-            // 保留普通位置标记和航偏角箭头，只清理旧的蓝色导航箭头
-            if (window.navArrowMarker) {{
-                map.remove(window.navArrowMarker);
-                window.navArrowMarker = null;
-            }}
-
-            // 确保当前位置标记存在
-            if (currentPos && !currentMarker) {{
-                currentMarker = new AMap.Marker({{
-                    position: currentPos,
-                    map: map,
-                    title: '当前位置',
-                    offset: new AMap.Pixel(-8, -8),
-                    content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
-                }});
-            }}
-            if (currentPos && pendingYaw !== null && !yawMarker) {{
-                updateYaw(pendingYaw);
-            }}
-
-            // 导航模式下用红色直线连接起点和终点（保留已有的规划路线）
-            if (window.navStraightLine) {{ map.remove(window.navStraightLine); }}
-            var startForNav = currentPos || window.routeStartPos || map.getCenter();
-            window.navStraightLine = new AMap.Polyline({{
-                path: [startForNav, destPos],
-                strokeColor: '#f44336',
-                strokeWeight: 4,
-                strokeOpacity: 0.9,
-                lineJoin: 'round',
-                zIndex: 99
-            }});
-            window.navStraightLine.setMap(map);
-
-            // 显示导航面板
-            if (isNavigating) {{
+                // 显示导航面板
                 document.getElementById('navPanel').style.display = 'block';
+
+                showToast('🧭 已进入导航模式', 'success');
+            }};
+
+            if (!isNavigating) {{
+                // 尚未规划路线，先规划再启动导航
+                doNavigate().then(function() {{
+                    startNavUI();
+                    startNavMonitoring();
+                }}).catch(function(err) {{
+                    showToast('路线规划失败，无法进入导航模式', 'error');
+                }});
+            }} else {{
+                // 路线已规划好，直接进入导航
+                startNavUI();
+                startNavMonitoring();
             }}
-            
-            showToast('🧭 已进入导航模式', 'success');
         }}
         
         // 将GPS位置投影到路线上（路径匹配）
@@ -2988,7 +3180,6 @@ class MapWidget(QWidget):
                 }}
             }}
             
-            document.getElementById('locationInfo').innerHTML = '📍' + (province || '未知') + '<br>' + lng.toFixed(5) + ',' + lat.toFixed(5);
         }}
         
         window.updatePosition = updatePosition;
@@ -3049,6 +3240,838 @@ class MapWidget(QWidget):
 </html>
 """
 
+    def generate_offline_html(self):
+        """生成离线地图 HTML (Leaflet + 本地瓦片)"""
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>离线骑行地图</title>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <link rel="stylesheet" href="leaflet/leaflet.css" />
+    <script src="leaflet/leaflet.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #1a1a1a;
+            overflow: hidden;
+        }}
+        #container {{
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }}
+
+        /* ========== 顶部搜索栏 ========== */
+        .search-panel {{
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            z-index: 2000;
+        }}
+        .input-row {{
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }}
+        .search-input {{
+            width: 420px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: #000;
+            border: 2px solid #4DB8FF;
+            border-radius: 10px;
+            padding: 12px 15px;
+            font-size: 16px;
+            outline: none;
+            height: 48px;
+        }}
+        .btn {{
+            background: linear-gradient(135deg, #4DB8FF, #3A9FE0);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 48px;
+            transition: all 0.1s;
+        }}
+        .btn:active {{ transform: scale(0.95); }}
+        .btn-route {{ background: linear-gradient(135deg, #3498db, #2980b9); }}
+        .btn-nav {{ background: linear-gradient(135deg, #2ecc71, #27ae60); }}
+        .btn-locate {{ background: linear-gradient(135deg, #9b59b6, #8e44ad); font-size: 18px; padding: 12px; }}
+        .btn-stop {{ background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 12px; display: none; }}
+        .btn-clear {{ background: linear-gradient(135deg, #666, #555); padding: 12px; }}
+
+        /* 展开/收起按钮 */
+        .btn-toggle {{
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 48px;
+            transition: all 0.1s;
+            min-width: 48px;
+        }}
+        .btn-toggle:active {{ transform: scale(0.95); }}
+
+        /* 按钮面板 —— 默认收起在 》》 按钮后方 */
+        .btn-slide-group {{
+            display: flex;
+            gap: 8px;
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            align-items: center;
+            pointer-events: none;
+            white-space: nowrap;
+        }}
+        .btn-slide-group.show {{
+            max-width: 600px;
+            opacity: 1;
+            pointer-events: auto;
+        }}
+
+        /* 地图缩放按钮 */
+        .zoom-controls {{
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }}
+        .btn-zoom {{
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            background: rgba(30, 30, 30, 0.95);
+            border: 2px solid #4DB8FF;
+            color: #4DB8FF;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }}
+        .btn-zoom:active {{
+            background: #4DB8FF;
+            color: white;
+            transform: scale(0.95);
+        }}
+
+        /* 位置信息 */
+        .location-info {{
+            position: absolute;
+            top: 75px;
+            left: 8px;
+            background: rgba(30, 30, 30, 0.95);
+            color: #4DB8FF;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1.5px solid #4DB8FF;
+            font-size: 12px;
+            z-index: 1000;
+        }}
+
+        /* 导航面板 */
+        .nav-panel {{
+            position: absolute;
+            bottom: 20px;
+            left: 8px;
+            right: 420px;
+            background: rgba(46, 204, 113, 0.95);
+            color: white;
+            padding: 12px 15px;
+            border-radius: 12px;
+            z-index: 2500;
+            display: none;
+        }}
+        .nav-instruction {{ font-size: 17px; font-weight: 600; margin-bottom: 4px; }}
+        .nav-detail {{ font-size: 12px; opacity: 0.9; }}
+
+        /* ========== 右侧半透明键盘 ========== */
+        .keyboard-wrapper {{
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 480px;
+            z-index: 3000;
+            display: none;
+        }}
+        .keyboard-wrapper.active {{ display: block; }}
+        .candidates-area {{
+            background: rgba(80, 80, 80, 0.5);
+            backdrop-filter: blur(4px);
+            border-radius: 12px 12px 0 0;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-bottom: none;
+            padding: 12px 14px;
+            margin-bottom: 0;
+        }}
+        .pinyin-row {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }}
+        .pinyin-label {{
+            color: #aaa;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .pinyin-text {{
+            color: #4DB8FF;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }}
+        .candidates-row {{
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            padding-bottom: 2px;
+        }}
+        .candidates-row::-webkit-scrollbar {{ display: none; }}
+        .candidate-item {{
+            background: rgba(100, 100, 100, 0.7);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 18px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.1s;
+            min-width: 42px;
+            text-align: center;
+        }}
+        .candidate-item:hover {{
+            background: rgba(77, 184, 255, 0.8);
+            border-color: #4DB8FF;
+        }}
+        .candidate-item:active {{ transform: scale(0.95); }}
+        .more-btn {{
+            background: #4DB8FF !important;
+            color: #fff !important;
+            font-weight: bold;
+            min-width: 40px;
+        }}
+        .keyboard-main {{
+            background: rgba(70, 70, 70, 0.5);
+            backdrop-filter: blur(4px);
+            border-radius: 0 0 12px 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding: 12px 10px 14px 10px;
+        }}
+        .kb-row {{
+            display: flex;
+            gap: 6px;
+            margin-bottom: 7px;
+            justify-content: center;
+        }}
+        .key {{
+            background: rgba(120, 120, 120, 0.6);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 0;
+            font-size: 18px;
+            font-weight: 500;
+            cursor: pointer;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.08s;
+            flex: 1;
+            max-width: 48px;
+        }}
+        .key:hover {{ background: rgba(140, 140, 140, 0.7); }}
+        .key:active {{ background: rgba(100, 100, 100, 0.8); transform: scale(0.96); }}
+        .key-shift {{ flex: 1.3; max-width: 62px; background: rgba(100, 100, 100, 0.65); font-size: 16px; }}
+        .key-back {{ flex: 1.3; max-width: 62px; background: rgba(110, 110, 110, 0.65); font-size: 16px; }}
+        .key-space {{ flex: 4; max-width: 220px; font-size: 16px; background: rgba(120, 120, 120, 0.6); }}
+        .key-enter {{ flex: 1.4; max-width: 78px; background: rgba(46, 204, 113, 0.7); font-size: 16px; color: white; font-weight: 600; }}
+        .key-lang {{ flex: 1; max-width: 50px; font-size: 13px; background: rgba(52, 152, 219, 0.7); }}
+        .row-qwerty {{ padding-left: 15px; padding-right: 15px; }}
+        .row-asdf {{ padding-left: 25px; padding-right: 25px; }}
+        .row-zxcv {{ padding-left: 10px; padding-right: 10px; }}
+        .row-space {{ padding-left: 20px; padding-right: 20px; }}
+
+        /* 离线提示 */
+        .offline-badge {{
+            position: absolute;
+            top: 75px;
+            right: 8px;
+            background: rgba(231, 76, 60, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 1000;
+        }}
+
+        /* Toast 提示框 */
+        .toast {{
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }}
+        .toast.show {{ opacity: 1; }}
+        .toast.error {{ background: rgba(231, 76, 60, 0.9); }}
+        .toast.success {{ background: rgba(46, 204, 113, 0.9); }}
+        .toast.warning {{ background: rgba(241, 196, 15, 0.9); }}
+
+        /* Leaflet 暗黑滤镜 */
+        .leaflet-tile-pane {{ filter: brightness(0.7) contrast(1.1) saturate(0.8); }}
+        .leaflet-container {{ background: #1a1a1a; }}
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <!-- 离线标识 -->
+    <div class="offline-badge" id="offlineBadge">离线模式</div>
+
+    <!-- 搜索面板 -->
+    <div class="search-panel">
+        <div style="position: relative;">
+            <div class="input-row">
+                <input type="text" id="searchInput" class="search-input" placeholder="点击地图选点或输入坐标 如 27.83,112.93" onclick="showKeyboard()">
+                <button class="btn btn-toggle" onclick="toggleBtnPanel()" title="展开/收起">》》</button>
+                <div id="btnPanel" class="btn-slide-group">
+                    <button class="btn btn-route" onclick="planOfflineRoute()" title="规划路线">🗺️ 路线</button>
+                    <button class="btn btn-nav" onclick="enterNavMode()" title="导航模式">🧭 导航</button>
+                    <button class="btn-zoom" onclick="zoomIn()" title="放大">+</button>
+                    <button class="btn-zoom" onclick="zoomOut()" title="缩小">−</button>
+                    <button class="btn btn-locate" onclick="showCurrentLocation()" title="当前位置">📍</button>
+                    <button class="btn btn-clear" onclick="clearAll()" title="清除">🗑️</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导航面板 -->
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-instruction" id="navInstruction">准备出发</div>
+        <div class="nav-detail" id="navDetail">--</div>
+    </div>
+
+    <!-- 键盘 -->
+    <div class="keyboard-wrapper" id="keyboard">
+        <div class="candidates-area">
+            <div class="pinyin-row">
+                <span class="pinyin-label">拼音</span>
+                <span id="pinyinText" class="pinyin-text"></span>
+            </div>
+            <div id="candidatesContainer" class="candidates-row"></div>
+        </div>
+        <div class="keyboard-main">
+            <div class="kb-row row-qwerty">
+                <button class="key" onclick="inputChar('q')">Q</button>
+                <button class="key" onclick="inputChar('w')">W</button>
+                <button class="key" onclick="inputChar('e')">E</button>
+                <button class="key" onclick="inputChar('r')">R</button>
+                <button class="key" onclick="inputChar('t')">T</button>
+                <button class="key" onclick="inputChar('y')">Y</button>
+                <button class="key" onclick="inputChar('u')">U</button>
+                <button class="key" onclick="inputChar('i')">I</button>
+                <button class="key" onclick="inputChar('o')">O</button>
+                <button class="key" onclick="inputChar('p')">P</button>
+            </div>
+            <div class="kb-row row-asdf">
+                <button class="key" onclick="inputChar('a')">A</button>
+                <button class="key" onclick="inputChar('s')">S</button>
+                <button class="key" onclick="inputChar('d')">D</button>
+                <button class="key" onclick="inputChar('f')">F</button>
+                <button class="key" onclick="inputChar('g')">G</button>
+                <button class="key" onclick="inputChar('h')">H</button>
+                <button class="key" onclick="inputChar('j')">J</button>
+                <button class="key" onclick="inputChar('k')">K</button>
+                <button class="key" onclick="inputChar('l')">L</button>
+            </div>
+            <div class="kb-row row-zxcv">
+                <button class="key key-shift" onclick="toggleShift()">⇧</button>
+                <button class="key" onclick="inputChar('z')">Z</button>
+                <button class="key" onclick="inputChar('x')">X</button>
+                <button class="key" onclick="inputChar('c')">C</button>
+                <button class="key" onclick="inputChar('v')">V</button>
+                <button class="key" onclick="inputChar('b')">B</button>
+                <button class="key" onclick="inputChar('n')">N</button>
+                <button class="key" onclick="inputChar('m')">M</button>
+                <button class="key key-back" onclick="handleBackspace()">⌫</button>
+            </div>
+            <div class="kb-row row-space">
+                <button class="key key-lang" onclick="toggleLang()">中/英</button>
+                <button class="key key-space" onclick="inputChar(' ')">空格</button>
+                <button class="key key-enter" onclick="confirmInput()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        var map, currentPos, destPos, currentMarker, destMarker, trackLine, yawMarker;
+        var isNavigating = false, routeInfo = null, trackPoints = [];
+        var pinyinBuffer = "";
+        var isShiftOn = false;
+        var isChineseMode = true;
+        var amapAPI = null;
+        var pinyinHandler = null;
+        var navHandler = null;
+        var isMapInitialized = false;
+        var pendingYaw = null;
+        var routeLine = null;
+        var offlineRouteShape = [];
+        var offlineManeuvers = [];
+
+        // DOM 加载完成后初始化
+        document.addEventListener("DOMContentLoaded", function() {{
+            console.log('DOM 加载完成');
+            initAll();
+        }});
+
+        function initAll() {{
+            initMap();
+
+            // 连接 QWebChannel
+            if (typeof qt !== 'undefined' && qt.webChannelTransport) {{
+                new QWebChannel(qt.webChannelTransport, function(channel) {{
+                    amapAPI = channel.objects.amapAPI;
+                    pinyinHandler = channel.objects.pinyinHandler;
+                    navHandler = channel.objects.navHandler;
+                    console.log('QWebChannel 连接成功');
+                }});
+            }} else {{
+                console.error('QWebChannel 未就绪');
+            }}
+
+            document.addEventListener('click', function(e) {{
+                var kb = document.getElementById('keyboard');
+                var input = document.getElementById('searchInput');
+                if (!kb || !kb.classList.contains('active')) return;
+                if (kb.contains(e.target) || input.contains(e.target)) return;
+                hideKeyboard();
+            }});
+        }}
+
+        function initMap() {{
+            if (isMapInitialized) return;
+
+            try {{
+                console.log('开始初始化离线地图...');
+
+                map = L.map('container', {{
+                    zoomControl: false,
+                    attributionControl: false
+                }}).setView([27.828, 112.944], 16);
+
+                L.tileLayer('{self.tile_server_url}', {{
+                    minZoom: 13,
+                    maxZoom: 16,
+                    tileSize: 256
+                }}).addTo(map);
+
+                // 比例尺
+                L.control.scale({{position: 'bottomleft', metric: true, imperial: false}}).addTo(map);
+
+                currentPos = null;
+                isMapInitialized = true;
+                console.log('离线地图初始化完成');
+
+                // 地图点击选点作为目的地
+                map.on('click', function(e) {{
+                    var lat = e.latlng.lat;
+                    var lng = e.latlng.lng;
+                    destPos = [lng, lat];
+                    if (destMarker) map.removeLayer(destMarker);
+                    destMarker = L.marker([lat, lng], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style="width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;">终</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        }})
+                    }}).addTo(map);
+                    document.getElementById('searchInput').value = lat.toFixed(5) + ',' + lng.toFixed(5);
+                    showToast('已设置目的地: ' + lat.toFixed(5) + ',' + lng.toFixed(5), 'success');
+                }});
+
+                // 通知 Python
+                if (typeof qt !== 'undefined' && qt.webChannelTransport) {{
+                    setTimeout(function() {{
+                        if (amapAPI) {{
+                            amapAPI.report_map_status(true);
+                        }}
+                    }}, 500);
+                }}
+            }} catch (e) {{
+                console.error('地图初始化失败:', e);
+                document.getElementById('container').innerHTML =
+                    '<div style="color: red; padding: 20px; text-align: center;">' +
+                    '<h3>离线地图加载失败</h3><p>' + e.message + '</p></div>';
+                if (amapAPI) {{
+                    amapAPI.report_map_status(false);
+                }}
+            }}
+        }}
+
+        // ========== 位置更新 ==========
+        window.updatePosition = function(lon, lat, province) {{
+            if (!map) return;
+            console.log('更新位置:', lon, lat, province);
+            currentPos = [lat, lon];
+
+            // 移动地图中心
+            map.panTo([lat, lon]);
+
+            // 添加/更新定位标记
+            var arrowHtml = '<div id="yaw-arrow" style="width:48px;height:48px;transform-origin:center center;">' +
+                '<svg width="48" height="48" viewBox="0 0 48 48">' +
+                '<circle cx="24" cy="24" r="8" fill="#4DB8FF" stroke="white" stroke-width="2"/>' +
+                '<path d="M24 4 L34 24 L24 20 L14 24 Z" fill="#4DB8FF" stroke="white" stroke-width="2"/>' +
+                '</svg></div>';
+
+            if (!currentMarker) {{
+                currentMarker = L.marker([lat, lon], {{
+                    icon: L.divIcon({{
+                        html: arrowHtml,
+                        className: '',
+                        iconSize: [48, 48],
+                        iconAnchor: [24, 24]
+                    }})
+                }}).addTo(map);
+            }} else {{
+                currentMarker.setLatLng([lat, lon]);
+            }}
+
+
+            if (pendingYaw !== null) {{
+                updateYaw(pendingYaw);
+                pendingYaw = null;
+            }}
+        }};
+
+        // ========== 航偏角更新 ==========
+        window.updateYaw = function(angle) {{
+            if (!currentMarker) {{
+                pendingYaw = angle;
+                return;
+            }}
+            var el = document.getElementById('yaw-arrow');
+            if (el) {{
+                el.style.transform = 'rotate(' + angle + 'deg)';
+            }}
+        }};
+
+        // ========== 缩放控制 ==========
+        window.zoomIn = function() {{
+            if (map) map.zoomIn();
+        }};
+        window.zoomOut = function() {{
+            if (map) map.zoomOut();
+        }};
+
+        // ========== 当前位置 ==========
+        window.showCurrentLocation = function() {{
+            if (currentPos) {{
+                map.setView(currentPos, 16);
+                showToast('已定位到当前位置', 'success');
+            }} else {{
+                showToast('当前位置未知', 'warning');
+            }}
+        }};
+
+        // ========== 导航模式（离线简化版：直线导航） ==========
+        window.enterNavMode = function() {{
+            if (!currentPos || !destPos) {{
+                showToast('请先设置目的地', 'warning');
+                return;
+            }}
+            isNavigating = true;
+            document.getElementById('navPanel').style.display = 'block';
+            var stopBtn = document.querySelector('.btn-stop');
+            if (stopBtn) stopBtn.style.display = 'inline-block';
+            showToast('开始导航（离线模式）', 'success');
+            // 通知 Python 开始导航（Python 会负责绘制路线、zoom、语音播报）
+            if (amapAPI) amapAPI.start_offline_navigation(destPos[1], destPos[0]);
+        }};
+
+        window.stopNavigation = function() {{
+            isNavigating = false;
+            document.getElementById('navPanel').style.display = 'none';
+            var stopBtn = document.querySelector('.btn-stop');
+            if (stopBtn) stopBtn.style.display = 'none';
+            if (routeLine) {{
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }}
+            offlineRouteShape = [];
+            offlineManeuvers = [];
+            if (navHandler) navHandler.on_nav_stopped();
+        }};
+
+        window.drawRouteLine = function() {{
+            if (!currentPos || !destPos || !map) return;
+            if (routeLine) {{
+                map.removeLayer(routeLine);
+            }}
+            routeLine = L.polyline([
+                [currentPos[0], currentPos[1]],
+                [destPos[1], destPos[0]]
+            ], {{
+                color: '#4DB8FF',
+                weight: 5,
+                opacity: 0.8,
+                dashArray: '10, 10'
+            }}).addTo(map);
+        }};
+
+        // 绘制 Valhalla 离线路线
+        window.drawOfflineRoute = function(shape, maneuvers) {{
+            if (!map || !shape || shape.length < 2) return;
+            offlineRouteShape = shape;
+            offlineManeuvers = maneuvers || [];
+            if (routeLine) {{
+                map.removeLayer(routeLine);
+            }}
+            // 绘制路线
+            routeLine = L.polyline(shape, {{
+                color: '#2ecc71',
+                weight: 6,
+                opacity: 0.9
+            }}).addTo(map);
+            // 适应视野
+            var bounds = L.latLngBounds(shape);
+            map.fitBounds(bounds, {{padding: [40, 40]}});
+            console.log('离线路线绘制完成，共' + shape.length + '个点，' + offlineManeuvers.length + '个导航指令');
+        }};
+
+        // ========== 清除 ==========
+        window.clearAll = function() {{
+            if (routeLine) {{
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }}
+            if (destMarker) {{
+                map.removeLayer(destMarker);
+                destMarker = null;
+            }}
+            if (window.historyLine) {{
+                map.removeLayer(window.historyLine);
+                window.historyLine = null;
+            }}
+            if (window.historyStartMarker) {{
+                map.removeLayer(window.historyStartMarker);
+                window.historyStartMarker = null;
+            }}
+            if (window.historyEndMarker) {{
+                map.removeLayer(window.historyEndMarker);
+                window.historyEndMarker = null;
+            }}
+            offlineRouteShape = [];
+            offlineManeuvers = [];
+            stopNavigation();
+            destPos = null;
+        }};
+
+        // ========== 工具函数 ==========
+        function formatDist(m) {{
+            if (m >= 1000) return (m / 1000).toFixed(1) + '公里';
+            return Math.round(m) + '米';
+        }}
+        function formatTime(s) {{
+            if (s >= 3600) return Math.floor(s / 3600) + '小时' + Math.floor((s % 3600) / 60) + '分';
+            return Math.floor(s / 60) + '分钟';
+        }}
+
+        // ========== 键盘输入 ==========
+        function inputChar(char) {{
+            if (isShiftOn && char >= 'a' && char <= 'z') {{
+                char = char.toUpperCase();
+            }}
+            if (char >= 'a' && char <= 'z' && isChineseMode) {{
+                pinyinBuffer += char;
+                updatePinyinDisplay();
+                fetchCandidates();
+            }} else {{
+                var input = document.getElementById('searchInput');
+                input.value += char;
+                clearPinyinState();
+            }}
+        }}
+        function updatePinyinDisplay() {{
+            var text = document.getElementById('pinyinText');
+            text.textContent = pinyinBuffer;
+        }}
+        function clearPinyinState() {{
+            pinyinBuffer = "";
+            updatePinyinDisplay();
+            document.getElementById('candidatesContainer').innerHTML = '';
+        }}
+        function fetchCandidates(page) {{
+            if (page === undefined) page = 0;
+            if (pinyinHandler) {{
+                pinyinHandler.get_candidates(pinyinBuffer, page).then(function(result) {{
+                    showCandidates(result);
+                }}).catch(function(err) {{
+                    console.error('获取候选词失败:', err);
+                }});
+            }}
+        }}
+        function showCandidates(result) {{
+            var container = document.getElementById('candidatesContainer');
+            container.innerHTML = '';
+            if (!result || !result.candidates) return;
+            result.candidates.forEach(function(c, i) {{
+                var span = document.createElement('span');
+                span.className = 'candidate-item';
+                span.textContent = c;
+                span.onclick = function(e) {{ e.stopPropagation(); selectCandidate(c); }};
+                container.appendChild(span);
+            }});
+            if (result.has_more) {{
+                var more = document.createElement('span');
+                more.className = 'candidate-item more-btn';
+                more.textContent = '>';
+                more.onclick = function(e) {{ e.stopPropagation(); fetchCandidates(result.page + 1); }};
+                container.appendChild(more);
+            }}
+        }}
+        function selectCandidate(char) {{
+            var input = document.getElementById('searchInput');
+            input.value += char;
+            clearPinyinState();
+            showKeyboard();
+        }}
+        function handleBackspace() {{
+            var input = document.getElementById('searchInput');
+            if (pinyinBuffer.length > 0) {{
+                pinyinBuffer = pinyinBuffer.slice(0, -1);
+                updatePinyinDisplay();
+                fetchCandidates();
+            }} else {{
+                input.value = input.value.slice(0, -1);
+            }}
+        }}
+        function toggleShift() {{ isShiftOn = !isShiftOn; }}
+        function toggleLang() {{ isChineseMode = !isChineseMode; clearPinyinState(); }}
+        function confirmInput() {{
+            hideKeyboard();
+            var val = document.getElementById('searchInput').value.trim();
+            if (!val) return;
+            var parts = val.split(/[,， ]+/);
+            if (parts.length >= 2) {{
+                var lat = parseFloat(parts[0]);
+                var lon = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {{
+                    destPos = [lon, lat];
+                    if (destMarker) map.removeLayer(destMarker);
+                    destMarker = L.marker([lat, lon], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style="width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;">终</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        }})
+                    }}).addTo(map);
+                    showToast('目的地已设置: ' + lat.toFixed(5) + ',' + lon.toFixed(5), 'success');
+                    return;
+                }}
+            }}
+            showToast('坐标格式错误，请使用 纬度,经度 如 27.83,112.93', 'warning');
+        }}
+
+        function planOfflineRoute() {{
+            var val = document.getElementById('searchInput').value.trim();
+            if (!val) {{
+                showToast('请先输入目的地坐标或点击地图选点', 'warning');
+                return;
+            }}
+            var parts = val.split(/[,， ]+/);
+            if (parts.length >= 2) {{
+                var lat = parseFloat(parts[0]);
+                var lon = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {{
+                    if (amapAPI) {{
+                        showToast('正在规划离线路线...', 'info');
+                        amapAPI.plan_offline_route(lat, lon);
+                    }} else {{
+                        showToast('QWebChannel 未就绪', 'error');
+                    }}
+                    return;
+                }}
+            }}
+            showToast('坐标格式错误，请使用 纬度,经度 如 27.83,112.93', 'warning');
+        }}
+
+        function showKeyboard() {{
+            document.getElementById('keyboard').classList.add('active');
+        }}
+        function hideKeyboard() {{
+            document.getElementById('keyboard').classList.remove('active');
+            clearPinyinState();
+        }}
+
+        function toggleBtnPanel() {{
+            var panel = document.getElementById('btnPanel');
+            panel.classList.toggle('show');
+        }}
+
+        // ========== Toast ==========
+        function showToast(message, type, duration) {{
+            if (duration === undefined) duration = 2500;
+            var toast = document.getElementById('toast');
+            if (!toast) {{
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }}
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.classList.add('show');
+            setTimeout(function() {{ toast.classList.remove('show'); }}, duration);
+        }}
+    </script>
+    <div id="toast" class="toast"></div>
+</body>
+</html>
+"""
+
     def update_location(self, lat, lon, province="未知"):
         """更新当前位置"""
         self.current_lat = lat
@@ -3056,21 +4079,31 @@ class MapWidget(QWidget):
         js_code = f"updatePosition({lon}, {lat}, '{province}');"
         self.web_view.page().runJavaScript(js_code)
 
+        # 离线导航跟踪
+        if self._offline_nav_active and self.nav_engine and self.nav_engine.is_active():
+            self.nav_engine.update_position(lat, lon)
+
     def update_yaw(self, angle):
         """更新航偏角箭头（0°指北，顺时针增加）"""
         js_code = f"updateYaw({angle});"
         self.web_view.page().runJavaScript(js_code)
+        # 传给离线导航引擎
+        if self.nav_engine:
+            self.nav_engine.update_yaw(angle)
 
     def set_zoom(self, zoom_level):
         """设置地图缩放级别
-        
+
         Args:
             zoom_level: 缩放级别，骑行导航推荐 16-17
                        15 - 看到街区范围
                        16-17 - 骑行导航最佳（能看清道路细节）
                        18 - 看到建筑细节
         """
-        js_code = f"map.setZoom({zoom_level});"
+        if self._mode == 'offline':
+            js_code = f"if(map) map.setZoom({zoom_level});"
+        else:
+            js_code = f"map.setZoom({zoom_level});"
         self.web_view.page().runJavaScript(js_code)
         print(f"[MapWidget] 地图缩放级别设置为: {zoom_level}")
 
@@ -3078,9 +4111,53 @@ class MapWidget(QWidget):
         """检查导航状态（由定时器调用）"""
         pass
 
+    def plan_offline_route(self, dest_lat, dest_lon):
+        """离线模式：仅规划路线（不启动导航）
+
+        Args:
+            dest_lat: 目的地纬度
+            dest_lon: 目的地经度
+        """
+        if not self.current_lat or not self.current_lon:
+            print("[MapWidget] 无法规划：当前位置未知")
+            return False
+
+        if not self.nav_engine:
+            print("[MapWidget] 离线路线规划不可用：导航引擎未初始化")
+            return False
+
+        # 备份 yaw，避免 clear 后丢失
+        yaw_backup = self.nav_engine._current_yaw
+        self.nav_engine.clear()
+        self.nav_engine._current_yaw = yaw_backup
+        self._offline_nav_active = False
+        self._last_nav_instruction = ""
+
+        js_code = f"""
+            destPos = [{dest_lon}, {dest_lat}];
+            if (destMarker) map.removeLayer(destMarker);
+            destMarker = L.marker([{dest_lat}, {dest_lon}], {{
+                icon: L.divIcon({{
+                    className: '',
+                    html: '<div style=\"width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;\">终</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                }})
+            }}).addTo(map);
+            showToast('正在规划离线路线...', 'info');
+        """
+        self.web_view.page().runJavaScript(js_code)
+
+        self.nav_engine.plan_route(
+            self.current_lon, self.current_lat,
+            dest_lon, dest_lat,
+            costing="bicycle"
+        )
+        return True
+
     def start_navigation(self, dest_lat, dest_lon):
         """开始导航到指定位置
-        
+
         Args:
             dest_lat: 目的地纬度
             dest_lon: 目的地经度
@@ -3088,33 +4165,212 @@ class MapWidget(QWidget):
         if not self.current_lat or not self.current_lon:
             print("[MapWidget] 无法导航：当前位置未知")
             return False
-        
-        js_code = f"""
-            destPos = [{dest_lon}, {dest_lat}];
-            // 添加目的地标记
-            if (destMarker) map.remove(destMarker);
-            destMarker = new AMap.Marker({{
-                position: destPos,
-                map: map,
-                title: '目的地',
-                icon: new AMap.Icon({{
-                    size: new AMap.Size(32, 32),
-                    image: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png',
-                    imageSize: new AMap.Size(32, 32)
-                }})
-            }});
-            doNavigate();
+
+        if self._mode == 'offline':
+            # 离线模式：需要先规划好路线才能导航
+            if not self.nav_engine or not self.nav_engine.is_active():
+                js = "showToast('请先点击路线按钮规划路线', 'warning');"
+                self.web_view.page().runJavaScript(js)
+                return False
+
+            self._offline_nav_active = True
+            self._last_nav_instruction = ""
+            self._last_rel_dir = ""
+            self.is_navigating = True
+
+            # Python 直接发送 JS 绘制正确路线 + 显示面板 + zoom=16
+            # 不依赖 JS 全局变量 offlineRouteShape
+            shape_js = json.dumps(self.nav_engine._shape)
+            js = f"""
+                offlineRouteShape = {shape_js};
+                if (routeLine) map.removeLayer(routeLine);
+                routeLine = L.polyline(offlineRouteShape, {{
+                    color: '#2ecc71',
+                    weight: 6,
+                    opacity: 0.9
+                }}).addTo(map);
+                document.getElementById('navPanel').style.display = 'block';
+                var stopBtn = document.querySelector('.btn-stop');
+                if (stopBtn) stopBtn.style.display = 'inline-block';
+                document.getElementById('navInstruction').textContent = '开始离线导航';
+                document.getElementById('navDetail').textContent = '正在获取导航指令...';
+                if(map) map.setZoom(16);
+            """
+            self.web_view.page().runJavaScript(js)
+
+            # 语音播报第一条指令 + 总览
+            maneuvers = self.nav_engine._maneuvers
+            total_dist = self.nav_engine._route.get('total_distance_km', 0) if self.nav_engine._route else 0
+            total_time = self.nav_engine._route.get('total_time_sec', 0) if self.nav_engine._route else 0
+
+            speak_parts = ["开始骑行"]
+            if total_dist > 0:
+                speak_parts.append(f"全程{total_dist:.1f}公里")
+            if total_time > 0:
+                minutes = int(total_time / 60)
+                speak_parts.append(f"预计{minutes}分钟")
+
+            # 加入相对方向（如果有 yaw 数据）
+            rel_dir = ""
+            yaw = self.nav_engine._current_yaw if self.nav_engine else None
+            print(f"[NavStart] yaw={yaw}, start={self.nav_engine._route['start']}, end={self.nav_engine._route['end']}")
+            if (self.nav_engine and yaw is not None):
+                from services.nav_engine import _bearing, _relative_direction
+                # 从当前位置看向终点的方位，作为"路线在你哪个方向"
+                end_lat, end_lon = self.nav_engine._route['end']
+                route_bearing = _bearing(self.current_lat, self.current_lon, end_lat, end_lon)
+                rel_dir = _relative_direction(yaw, route_bearing)
+                print(f"[NavStart] route_bearing(current->end)={route_bearing:.1f}, rel_dir={rel_dir}")
+                if rel_dir:
+                    speak_parts.append(f"骑行路线在你的{rel_dir}")
+                    self._last_rel_dir = rel_dir  # 同步，避免 _on_nav_updated 再播报一次
+            else:
+                print("[NavStart] 无 yaw 数据，跳过方向播报")
+
+            self.nav_instruction.emit("，".join(speak_parts))
+            return True
+        else:
+            # 在线模式：计算相对方向（如果有 yaw）并通过 JS 传递
+            rel_dir = ""
+            if self.current_lat and self.current_lon:
+                yaw = getattr(self.nav_engine, '_current_yaw', None) if self.nav_engine else None
+                if yaw is not None:
+                    from services.nav_engine import _bearing, _relative_direction
+                    route_bearing = _bearing(self.current_lat, self.current_lon, dest_lat, dest_lon)
+                    rel_dir = _relative_direction(yaw, route_bearing)
+                    print(f"[NavStart-Online] yaw={yaw}, route_bearing={route_bearing:.1f}, rel_dir={rel_dir}")
+
+            js_code = f"""
+                destPos = [{dest_lon}, {dest_lat}];
+                window._navRelDir = "{rel_dir}";
+                // 添加目的地标记
+                if (destMarker) map.remove(destMarker);
+                destMarker = new AMap.Marker({{
+                    position: destPos,
+                    map: map,
+                    title: '目的地',
+                    icon: new AMap.Icon({{
+                        size: new AMap.Size(32, 32),
+                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png',
+                        imageSize: new AMap.Size(32, 32)
+                    }})
+                }});
+                doNavigate();
+            """
+            self.web_view.page().runJavaScript(js_code)
+            self.is_navigating = True
+            return True
+
+    def _on_route_planned(self, route):
+        """Valhalla 路线规划完成回调（仅绘制路线，不进入导航）"""
+        print(f"[MapWidget] 离线路线规划完成，总长 {route['total_distance_km']:.2f} km")
+        shape = route['shape']
+        maneuvers = route['maneuvers']
+        # 传给 JS 绘制
+        shape_js = json.dumps(shape)
+        maneuvers_js = json.dumps([
+            {"type": m.get("type", 0),
+             "instruction": m.get("instruction", ""),
+             "length": m.get("length", 0),
+             "time": m.get("time", 0)}
+            for m in maneuvers
+        ])
+        js = f"""
+            drawOfflineRoute({shape_js}, {maneuvers_js});
+            if(map) map.setZoom(14);
+            showToast('路线规划完成，点击导航开始骑行', 'success');
         """
-        self.web_view.page().runJavaScript(js_code)
-        self.is_navigating = True
-        return True
+        self.web_view.page().runJavaScript(js)
+        # 不进入导航模式，不播报 — 等待用户点击"导航"按钮
+
+    def _on_route_failed(self, error_msg):
+        """Valhalla 路线规划失败回调"""
+        print(f"[MapWidget] 离线路线规划失败: {error_msg}")
+        self._offline_nav_active = False
+        js = f"showToast('路线规划失败: {error_msg}', 'error');"
+        self.web_view.page().runJavaScript(js)
+
+    def _on_nav_updated(self, state):
+        """离线导航状态更新回调"""
+        if not state or not self._offline_nav_active:
+            return
+        instruction = state.get("current_instruction", "")
+        dist_next = state.get("distance_to_next_maneuver", 0)
+        remaining_km = state.get("remaining_distance_km", 0)
+        off_route = state.get("off_route", False)
+        arrived = state.get("arrived", False)
+
+        if arrived:
+            js = "showToast('已到达目的地', 'success'); document.getElementById('navPanel').style.display='none';"
+            self.web_view.page().runJavaScript(js)
+            self.nav_instruction.emit("已到达目的地")
+            self._offline_nav_active = False
+            return
+
+        if off_route and state.get("deviation_count", 0) > 3:
+            self.nav_instruction.emit("您已偏离路线")
+            js = "document.getElementById('navInstruction').textContent = '已偏离路线';"
+            self.web_view.page().runJavaScript(js)
+            return
+
+        # 更新导航面板
+        rel_dir = state.get("relative_direction", "")
+        detail = f"剩余{remaining_km:.1f}公里"
+        if dist_next > 0:
+            detail += f" | 前方{dist_next:.0f}米{instruction}"
+        if rel_dir:
+            detail += f" | 路线在{rel_dir}"
+        js = f"""
+            document.getElementById('navInstruction').textContent = '{instruction}';
+            document.getElementById('navDetail').textContent = '{detail}';
+        """
+        self.web_view.page().runJavaScript(js)
+
+        # 语音播报：1. 相对方向变化（只要有 yaw 数据就播报，不受距离限制）
+        rel_dir = state.get("relative_direction", "")
+        print(f"[NavUpdate] step={state.get('current_step')}, rel_dir={rel_dir}, last_rel_dir={self._last_rel_dir}, dist_next={dist_next}")
+        if rel_dir and rel_dir != self._last_rel_dir:
+            self._last_rel_dir = rel_dir
+            print(f"[NavUpdate] 播报方向: 骑行路线在你的{rel_dir}")
+            self.nav_instruction.emit(f"骑行路线在你的{rel_dir}")
+
+        # 语音播报：2. 转弯指令（只在接近时播报，且不再播报绝对方向如"出发后左转"）
+        if instruction and instruction != self._last_nav_instruction:
+            if dist_next < 200 or state.get("current_step", 0) == 0:
+                self._last_nav_instruction = instruction
+                # 只播报距离提示，不播报"出发后左转"这类绝对指令
+                if 0 < dist_next < 200:
+                    self.nav_instruction.emit(f"前方{dist_next:.0f}米转弯")
 
     def stop_navigation(self):
         """停止导航"""
         self.web_view.page().runJavaScript("stopNavigation();")
         self.is_navigating = False
+        self._offline_nav_active = False
+        self._last_nav_instruction = ""
+        self._last_rel_dir = ""
+        if self.nav_engine:
+            self.nav_engine.clear()
         self.navigation_handler.reset()
-    
+
+    def _set_offline_dest_js(self, lat: float, lon: float):
+        """JS 回调：在地图上设置目的地标记（不启动导航）"""
+        js = f"""
+            destPos = [{lon}, {lat}];
+            if (destMarker) map.removeLayer(destMarker);
+            destMarker = L.marker([{lat}, {lon}], {{
+                icon: L.divIcon({{
+                    className: '',
+                    html: '<div style=\"width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;\">终</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                }})
+            }}).addTo(map);
+            document.getElementById('searchInput').value = '{lat:.5f},{lon:.5f}';
+            showToast('目的地已设置: {lat:.5f},{lon:.5f}', 'success');
+        """
+        self.web_view.page().runJavaScript(js)
+
     def get_navigation_handler(self):
         """获取导航处理器"""
         return self.navigation_handler
@@ -3129,48 +4385,85 @@ class MapWidget(QWidget):
         """
         if not track_points:
             return
-        path_js = str([[p["lon"], p["lat"]] for p in track_points])
+        path_js = str([[p["lat"], p["lon"]] for p in track_points])
         start = track_points[0]
         end = track_points[-1]
-        js = f"""
-            clearAll();
-            var historyPath = {path_js};
-            if (historyPath.length > 0) {{
-                window.historyLine = new AMap.Polyline({{
-                    path: historyPath,
-                    strokeColor: '#2ecc71',
-                    strokeWeight: 4,
-                    strokeOpacity: 0.9,
-                    map: map,
-                    showDir: true
-                }});
 
-                window.historyStartMarker = new AMap.Marker({{
-                    position: [{start['lon']}, {start['lat']}],
-                    map: map,
-                    icon: new AMap.Icon({{
-                        size: new AMap.Size(24, 24),
-                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/start.png',
-                        imageSize: new AMap.Size(24, 24)
-                    }}),
-                    title: '起点'
-                }});
+        if self._mode == 'offline':
+            js = f"""
+                clearAll();
+                var historyPath = {path_js};
+                if (historyPath.length > 0) {{
+                    window.historyLine = L.polyline(historyPath, {{
+                        color: '#2ecc71',
+                        weight: 4,
+                        opacity: 0.9
+                    }}).addTo(map);
 
-                window.historyEndMarker = new AMap.Marker({{
-                    position: [{end['lon']}, {end['lat']}],
-                    map: map,
-                    icon: new AMap.Icon({{
-                        size: new AMap.Size(24, 24),
-                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/end.png',
-                        imageSize: new AMap.Size(24, 24)
-                    }}),
-                    title: '终点'
-                }});
+                    window.historyStartMarker = L.marker([{start['lat']}, {start['lon']}], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style=\"width:28px;height:28px;background:#2ecc71;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:12px;\">起</div>',
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14]
+                        }})
+                    }}).addTo(map);
+                    window.historyEndMarker = L.marker([{end['lat']}, {end['lon']}], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style=\"width:28px;height:28px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:12px;\">终</div>',
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14]
+                        }})
+                    }}).addTo(map);
 
-                // 延迟执行 setFitView，确保 overlay 已渲染
-                setTimeout(function() {{
-                    map.setFitView([window.historyLine, window.historyStartMarker, window.historyEndMarker]);
-                }}, 200);
-            }}
-        """
+                    var bounds = L.latLngBounds(historyPath);
+                    setTimeout(function() {{
+                        map.fitBounds(bounds, {{padding: [30, 30]}});
+                    }}, 200);
+                }}
+            """
+        else:
+            path_js_amap = str([[p["lon"], p["lat"]] for p in track_points])
+            js = f"""
+                clearAll();
+                var historyPath = {path_js_amap};
+                if (historyPath.length > 0) {{
+                    window.historyLine = new AMap.Polyline({{
+                        path: historyPath,
+                        strokeColor: '#2ecc71',
+                        strokeWeight: 4,
+                        strokeOpacity: 0.9,
+                        map: map,
+                        showDir: true
+                    }});
+
+                    window.historyStartMarker = new AMap.Marker({{
+                        position: [{start['lon']}, {start['lat']}],
+                        map: map,
+                        icon: new AMap.Icon({{
+                            size: new AMap.Size(24, 24),
+                            image: 'https://webapi.amap.com/theme/v1.3/markers/n/start.png',
+                            imageSize: new AMap.Size(24, 24)
+                        }}),
+                        title: '起点'
+                    }});
+
+                    window.historyEndMarker = new AMap.Marker({{
+                        position: [{end['lon']}, {end['lat']}],
+                        map: map,
+                        icon: new AMap.Icon({{
+                            size: new AMap.Size(24, 24),
+                            image: 'https://webapi.amap.com/theme/v1.3/markers/n/end.png',
+                            imageSize: new AMap.Size(24, 24)
+                        }}),
+                        title: '终点'
+                    }});
+
+                    // 延迟执行 setFitView，确保 overlay 已渲染
+                    setTimeout(function() {{
+                        map.setFitView([window.historyLine, window.historyStartMarker, window.historyEndMarker]);
+                    }}, 200);
+                }}
+            """
         self.web_view.page().runJavaScript(js)

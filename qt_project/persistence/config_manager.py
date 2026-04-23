@@ -37,6 +37,7 @@ class ConfigManager:
         "aliyun_tts_api_key": "sk-c6ec991c7d9d4fba8c95803fe55b47e6",
         "aliyun_tts_voice": "Maia",
         "aliyun_tts_model": "qwen3-tts-flash",
+        "last_online_mode": True,  # True=online, False=offline
     }
 
     def __new__(cls) -> "ConfigManager":
@@ -98,6 +99,15 @@ class ConfigManager:
         alerts = self._config.get("alerts_enabled", {})
         alerts[alert_name] = enabled
         self._config["alerts_enabled"] = alerts
+        self.save()
+
+    def get_last_online_mode(self) -> bool:
+        """获取上次保存的在线/离线模式"""
+        return self._config.get("last_online_mode", True)
+
+    def set_last_online_mode(self, online: bool):
+        """保存在线/离线模式"""
+        self._config["last_online_mode"] = online
         self.save()
 
     def all(self) -> Dict[str, Any]:

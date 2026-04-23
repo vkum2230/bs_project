@@ -31,6 +31,7 @@ from persistence.config_manager import get_config
 from persistence.ride_repository import RideRepository
 from services.ride_service import RideService
 from services.alert_service import AlertService
+from utils.tile_server import get_tile_server
 
 
 class BikeComputerPro(QWidget):
@@ -56,6 +57,24 @@ class BikeComputerPro(QWidget):
         self.amap_security_key = "8ee0cb41f7666cfd320749d269ab6121"  # 安全密钥
         self.location_service = LocationService()
         # ==================================
+
+        # 地图页面访问标志：只有用户主动点击地图按钮后才播报加载结果
+        self._map_page_visited = False
+
+        # 全局在线/离线状态管理
+        self._global_online_mode = self.config.get_last_online_mode()  # True=在线, False=离线
+        self._auto_fallback_count = 0  # 自动降级次数（防循环）
+
+        # ========== 本地瓦片服务器 ==========
+        self.tile_server = None
+        try:
+            from utils.tile_server import get_tile_server
+            self.tile_server = get_tile_server(tiles_root="maps/xiangtan_tiles", port=8766)
+            self.tile_server.start()
+            print(f"[Main] 瓦片服务器 URL: {self.tile_server.url}")
+        except Exception as e:
+            print(f"[Main] 瓦片服务器启动失败: {e}")
+        # ===================================
 
         # ========== 语音模块初始化 ==========
         self.voice_player = None
@@ -354,12 +373,23 @@ class BikeComputerPro(QWidget):
         self.wifi_icon_label.setFixedSize(36, 22)
         self.wifi_icon_label.setStyleSheet("background: transparent; margin-right: 8px;")
 
+        # 在线/离线地图切换按钮
+        self.btn_map_mode = QPushButton("在线")
+        self.btn_map_mode.setFont(QFont("Helvetica", 10, QFont.Bold))
+        self.btn_map_mode.setFixedSize(50, 28)
+        self.btn_map_mode.setStyleSheet(
+            "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 6px; }"
+            "QPushButton:pressed { background-color: #27ae60; }"
+        )
+        self.btn_map_mode.clicked.connect(self._toggle_map_mode)
+
         self.time_label = QLabel()
         self.time_label.setStyleSheet("color: #FFFFFF; background: transparent;")
         self.time_label.setFont(QFont("Arial", 17, QFont.Bold))
 
         self.right_layout.addWidget(self.zt_status_label)
         self.right_layout.addWidget(self.heading_label)
+        self.right_layout.addWidget(self.btn_map_mode)
         self.right_layout.addWidget(self.wifi_icon_label)
         self.right_layout.addWidget(self.time_label)
 
@@ -641,24 +671,30 @@ class BikeComputerPro(QWidget):
         right_layout.addWidget(sensor_frame, 2)
         data_main_layout.addWidget(right_panel, 1)
 
-        # 地图页面（使用高德在线地图组件）
+        # 地图页面（支持在线/离线双模式）
+        tile_url = self.tile_server.url if self.tile_server else "http://localhost:8766/{z}/{x}/{y}.png"
+        init_mode = "online" if self._global_online_mode else "offline"
         self.page_map = MapWidget(
             amap_key=self.amap_key,
             jsapi_key=self.amap_jsapi_key,
-            security_key=self.amap_security_key
+            security_key=self.amap_security_key,
+            tile_server_url=tile_url,
+            mode=init_mode
         )
         self.page_map.map_loaded.connect(self.on_map_loaded)
-        
-        # 连接导航信号
+        self.page_map.mode_changed.connect(self._on_map_mode_changed)
+        self.page_map.route_planning_failed.connect(self._on_online_fallback)
+
         # 连接导航信号
         self.page_map.nav_status_changed.connect(self.on_nav_status_changed)
         self.page_map.nav_instruction.connect(self.on_nav_instruction)
-        
+
         # 连接新的导航处理器信号
         nav_handler = self.page_map.get_navigation_handler()
         nav_handler.nav_started.connect(self.on_nav_started)
         nav_handler.nav_stopped.connect(self.on_nav_stopped)
         nav_handler.nav_instruction.connect(self.on_nav_instruction_v2)
+        nav_handler.nav_overview.connect(self.on_nav_overview)
         
         # --- 历史记录页面 ---
         self.page_history = HistoryPage(ride_repo=self.ride_repo, parent=self)
@@ -739,7 +775,15 @@ class BikeComputerPro(QWidget):
         # 延迟 3 秒后播报欢迎语（给语音播放器初始化时间）
         self.voice_timer = QTimer(self)
         self.voice_timer.singleShot(3000, self._play_welcome_voice)
-        # ================================== 
+        # ==================================
+
+        # 同步状态栏按钮样式到当前全局模式
+        if not self._global_online_mode:
+            self.btn_map_mode.setText("离线")
+            self.btn_map_mode.setStyleSheet(
+                "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 6px; }"
+                "QPushButton:pressed { background-color: #c0392b; }"
+            )
 
     def _init_ollama_client(self):
         """
@@ -898,11 +942,15 @@ class BikeComputerPro(QWidget):
         self.page_map.clear_track()
 
     def show_map_page(self):
+        self._map_page_visited = True
         self.stacked_widget.setCurrentIndex(1)
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.active_style)
         self.btn_history.setStyleSheet(self.inactive_style)
         self.btn_settings.setStyleSheet(self.inactive_style)
+        # 如果地图已在后台加载完成，立即播报加载成功
+        if self.page_map.is_map_loaded():
+            self.on_map_loaded(True)
 
     def show_history_page(self):
         self.stacked_widget.setCurrentIndex(2)
@@ -921,6 +969,100 @@ class BikeComputerPro(QWidget):
         self.btn_settings.setStyleSheet(self.active_style)
         self.page_map.clear_track()
 
+    def _check_network(self) -> bool:
+        """检查网络连接（多地址容错）"""
+        import socket
+        check_hosts = [
+            ("223.5.5.5", 53),
+            ("114.114.114.114", 53),
+            ("8.8.8.8", 53),
+        ]
+        for host, port in check_hosts:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                sock.connect((host, port))
+                sock.close()
+                return True
+            except Exception:
+                continue
+        return False
+
+    def set_global_online_mode(self, online: bool, auto_fallback: bool = False):
+        """设置全局在线/离线状态
+
+        Args:
+            online: True=在线, False=离线
+            auto_fallback: 是否由自动降级触发
+        """
+        if self._global_online_mode == online:
+            return
+
+        self._global_online_mode = online
+        self.config.set_last_online_mode(online)
+
+        new_mode = "online" if online else "offline"
+        self.page_map.set_mode(new_mode)
+
+        if online:
+            # 手动切回在线时重置降级计数，允许下次再次自动降级
+            self._auto_fallback_count = 0
+        elif auto_fallback:
+            self._auto_fallback_count += 1
+            print(f"[Main] 自动降级到离线模式 (第 {self._auto_fallback_count} 次)")
+
+    def _toggle_map_mode(self):
+        """切换在线/离线地图模式（带网络检查）"""
+        if self._global_online_mode:
+            # 在线 → 离线：直接切换
+            self.set_global_online_mode(False)
+        else:
+            # 离线 → 在线：先检查网络
+            if self._check_network():
+                self.set_global_online_mode(True)
+            else:
+                print("[Main] 无网络，拒绝切换到在线模式")
+                self.add_voice_message("当前无网络，无法切换在线模式", icon="⚠️")
+                if self.voice_player:
+                    self.voice_player.speak("当前无网络，无法切换在线模式", show_in_ui=False)
+
+    def _on_online_fallback(self, auto_fallback: bool):
+        """在线功能失败时的降级回调"""
+        if not self._global_online_mode:
+            return  # 已经是离线模式
+        if self._auto_fallback_count >= 1:
+            print("[Main] 已自动降级过，不再重复降级")
+            return
+
+        print("[Main] 在线功能失败，触发自动降级到离线")
+        self.set_global_online_mode(False, auto_fallback=True)
+        self.add_voice_message("网络异常，已自动切换至离线地图", icon="⚠️")
+        if self.voice_player:
+            self.voice_player.speak("网络异常，已自动切换至离线地图", show_in_ui=False)
+
+    def _on_map_mode_changed(self, mode: str):
+        """地图模式切换后的回调"""
+        if mode == "offline":
+            self.btn_map_mode.setText("离线")
+            self.btn_map_mode.setStyleSheet(
+                "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 6px; }"
+                "QPushButton:pressed { background-color: #c0392b; }"
+            )
+            if self._auto_fallback_count == 0:
+                # 仅用户手动切换时才播报，避免自动降级时重复播报
+                self.add_voice_message("已切换至离线地图", icon="🗺️")
+                if self.voice_player:
+                    self.voice_player.speak("已切换至离线地图", show_in_ui=False)
+        else:
+            self.btn_map_mode.setText("在线")
+            self.btn_map_mode.setStyleSheet(
+                "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 6px; }"
+                "QPushButton:pressed { background-color: #27ae60; }"
+            )
+            self.add_voice_message("已切换至在线地图", icon="🗺️")
+            if self.voice_player:
+                self.voice_player.speak("已切换至在线地图", show_in_ui=False)
+
     def _on_config_saved(self):
         print("[Main] 配置已更新并保存")
         self.add_voice_message("设置已保存", icon="⚙️")
@@ -931,6 +1073,12 @@ class BikeComputerPro(QWidget):
             self.serial_worker.stop()
         if hasattr(self, 'debugger'):
             self.debugger.stop()
+        # 停止瓦片服务器
+        if hasattr(self, 'tile_server') and self.tile_server:
+            try:
+                self.tile_server.stop()
+            except:
+                pass
         # 清理语音模块资源
         if self.voice_player:
             try:
@@ -1070,7 +1218,6 @@ class BikeComputerPro(QWidget):
         if "yaw" in data:
             yaw_val = float(data["yaw"])
             self.page_map.update_yaw(yaw_val)
-            self.heading_label.setText(self.yaw_to_direction(yaw_val))
 
         if "err_code" in data:
             err = int(data["err_code"])
@@ -1163,19 +1310,12 @@ class BikeComputerPro(QWidget):
         #     self.voice_player.speak(status)
 
     def on_nav_started(self):
-        """导航开始回调"""
-        print("[Main] 导航开始")
-        self.add_voice_message("开始导航", icon="🧭")
-        if self.voice_player:
-            try:
-                self.voice_player.speak("开始导航")
-            except Exception as e:
-                print(f"[Voice] 导航开始播报失败: {e}")
-    
+        """导航开始回调——总览播报已在 on_nav_overview 中处理，此处不再重复播报"""
+        print("[Main] 导航开始（总览播报由 on_nav_overview 统一处理）")
+
     def on_nav_stopped(self):
-        """导航结束回调"""
+        """导航结束回调——只语音播报，UI 由 voice player 回调统一显示"""
         print("[Main] 导航结束")
-        self.add_voice_message("导航结束", icon="🧭")
         if self.voice_player:
             try:
                 self.voice_player.speak("导航结束")
@@ -1183,29 +1323,44 @@ class BikeComputerPro(QWidget):
                 print(f"[Voice] 导航结束播报失败: {e}")
     
     def on_nav_instruction_v2(self, instruction: str, detail: str):
-        """导航指令回调 V2（带详细信息）"""
+        """导航指令回调 V2（带详细信息）——只语音播报，UI 由 voice player 回调统一显示"""
         print(f"[Main] 导航指令: {instruction} | {detail}")
-        
-        # 添加到语音消息框
-        self.add_voice_message(instruction, icon="🧭")
-        
-        # 语音播报导航指令（简化版，去除HTML标签和距离数字）
+
         if self.voice_player:
             try:
-                # 简化指令用于语音播报
+                # 简化指令用于语音播报，voice player 内部会自动显示 🔊 消息
                 speak_text = self._simplify_nav_instruction(instruction)
                 self.voice_player.speak(speak_text)
             except Exception as e:
                 print(f"[Voice] 导航语音播报失败: {e}")
-    
+
+    def on_nav_overview(self, text: str):
+        """导航总览回调（在线地图导航开始时播报）"""
+        print(f"[Main] 导航总览: {text}")
+        if self.voice_player:
+            try:
+                self.voice_player.speak(text)
+            except Exception as e:
+                print(f"[Voice] 导航总览播报失败: {e}")
+
     def on_map_loaded(self, success: bool):
-        """地图加载完成回调"""
+        """地图加载完成回调——只有用户主动进入地图页面后才播报"""
+        if not self._map_page_visited:
+            return
         if success:
             print("[Main] ✅ 地图页面加载成功！")
-            self.add_voice_message("地图加载成功", icon="🗺️")
+            if self.voice_player:
+                try:
+                    self.voice_player.speak("地图加载成功")
+                except Exception as e:
+                    print(f"[Voice] 地图加载成功播报失败: {e}")
         else:
             print("[Main] ❌ 地图页面加载失败！")
-            self.add_voice_message("地图加载失败，请检查网络或API配置", icon="⚠️")
+            if self.voice_player:
+                try:
+                    self.voice_player.speak("地图加载失败，请检查网络或API配置")
+                except Exception as e:
+                    print(f"[Voice] 地图加载失败播报失败: {e}")
     
     def _simplify_nav_instruction(self, instruction: str) -> str:
         """简化导航指令用于语音播报"""
@@ -1218,13 +1373,10 @@ class BikeComputerPro(QWidget):
         return text
     
     def on_nav_instruction(self, instruction):
-        """导航指令回调（旧版，用于兼容）"""
+        """导航指令回调（旧版，用于兼容）——只语音播报，UI 由 voice player 回调统一显示"""
         print(f"导航指令: {instruction}")
 
-        # 添加到语音消息框
-        self.add_voice_message(instruction, icon="🧭")
-
-        # 语音播报导航指令
+        # 语音播报导航指令，voice player 内部会自动显示 🔊 消息
         if self.voice_player:
             try:
                 self.voice_player.speak(instruction)
