@@ -1200,6 +1200,8 @@ class BikeComputerPro(QWidget):
             from core.data_context import get_data_context
             sensor = SensorData.from_stm32_json(data)
             get_data_context().update_from_sensor(sensor)
+            # 保存到文件，供LLM读取
+            get_data_context().save_to_file()
             # 推送到通信服务（由 CommService 决定何时发给 App）
             self.comm_service.on_sensor_data(sensor)
             # 推送到骑行服务

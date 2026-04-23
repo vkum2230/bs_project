@@ -5,6 +5,8 @@
 用于向大模型提供实时骑行数据
 """
 
+import json
+import os
 import threading
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
@@ -95,6 +97,18 @@ class DataContextManager:
         self._data = RideData()
         self._data_lock = threading.Lock()
         self._callbacks = []
+        self._context_file = os.path.expanduser("~/smartride/current_ride_state.json")
+
+    def save_to_file(self):
+        """将当前骑行数据保存到文件，供LLM读取"""
+        try:
+            os.makedirs(os.path.dirname(self._context_file), exist_ok=True)
+            with self._data_lock:
+                data_dict = self._data.to_dict()
+            with open(self._context_file, "w", encoding="utf-8") as f:
+                json.dump(data_dict, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[DataContext] 保存数据到文件失败: {e}")
     
     def update_data(self, **kwargs):
         """更新数据"""
@@ -139,6 +153,7 @@ class DataContextManager:
     def get_system_prompt_with_context(self, base_prompt: str = None, all_fields: bool = True) -> str:
         """
         生成带数据上下文的系统提示词
+        格式：先说明骑行场景，再列出所有实时数据，最后给出回答指令
         """
         context = self.get_context_string(all_fields=all_fields)
 
@@ -146,11 +161,18 @@ class DataContextManager:
 
         return f"""{base}
 
+【骑行场景】
+用户正在户外骑行，以下是该用户的实时骑行数据，数据会随着骑行过程实时更新。
+
+【实时骑行数据】
 {context}
 
-你可以根据上述实时骑行数据回答用户问题。数据会自动更新。
-回答要简洁明了，适合骑行过程中听取。
-不要加星号、下划线等Markdown格式符号。"""
+【回答要求】
+1. 请严格根据上述实时数据回答用户问题，数据是实时且准确的。
+2. 如果用户询问具体数值（如速度、心率、功率等），请直接给出当前数值，不要绕弯子。
+3. 回答要简洁明了，适合骑行过程中听取，控制在100字以内。
+4. 不要加星号、下划线等Markdown格式符号。
+5. 如果数据为0，说明该传感器暂无读数或用户尚未开始骑行。"""
 
 
 # 全局实例

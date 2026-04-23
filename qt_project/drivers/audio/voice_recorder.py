@@ -581,77 +581,8 @@ class ButtonVoiceAssistant:
                     if self.message_callback:
                         self.message_callback(f"> {clean_text}", icon="💬")
                     
-                    # 获取实时数据
-                    try:
-                        import sys
-                        sys.path.insert(0, '/home/hedya/Desktop/bs_project/qt_project')
-                        from core.data_context import get_data_context
-                        d = get_data_context().get_data()
-                        
-                        # 只检测明确的数据查询关键词
-                        data_keywords = ['速度', '功率', '踏频', '心率', '温度', '坡度', '距离', '时间', '里程', '数据']
-                        is_data_query = any(kw in clean_text for kw in data_keywords)
-                        
-                        if is_data_query and d.speed > 0:
-                            # 根据用户问题智能选择要回答的数据
-                            print(f"[ButtonVoiceAssistant] 识别文本: '{clean_text}'")
-                            parts = []
-                            
-                            # 检测用户具体问什么
-                            if '速度' in clean_text:
-                                parts.append(f"速度{d.speed:.1f}公里每小时")
-                            if '功率' in clean_text:
-                                parts.append(f"功率{d.power:.0f}瓦")
-                            if '踏频' in clean_text:
-                                parts.append(f"踏频{d.cadence:.0f}转每分钟")
-                            if '心率' in clean_text:
-                                parts.append(f"心率{d.heart_rate:.0f}次每分钟")
-                            if '温度' in clean_text or '气温' in clean_text:
-                                parts.append(f"环境温度{d.temperature:.1f}摄氏度")
-                            if '距离' in clean_text or '里程' in clean_text:
-                                parts.append(f"已骑行{d.distance:.1f}公里")
-                            if '时间' in clean_text:
-                                hours = d.ride_time // 3600
-                                mins = (d.ride_time % 3600) // 60
-                                parts.append(f"骑行时间{hours}小时{mins}分钟")
-                            if '坡度' in clean_text:
-                                prefix = "上坡" if d.slope > 0 else "下坡"
-                                parts.append(f"{prefix}{abs(d.slope):.1f}%坡度")
-                            
-                            # 问"数据"时播报所有，否则只回答匹配的具体数据
-                            if '数据' in clean_text:
-                                parts = [f"速度{d.speed:.1f}公里每小时"]
-                                if d.power > 0: parts.append(f"功率{d.power:.0f}瓦")
-                                if d.cadence > 0: parts.append(f"踏频{d.cadence:.0f}")
-                                if d.distance > 0: parts.append(f"骑行{d.distance:.1f}公里")
-                                if d.heart_rate > 0: parts.append(f"心率{d.heart_rate:.0f}")
-                                if d.temperature > 0: parts.append(f"温度{d.temperature:.1f}度")
-                            
-                            # 调试：查看匹配了哪些数据
-                            print(f"[ButtonVoiceAssistant] 匹配到的数据项: {parts}")
-                            
-                            reply = "，".join(parts) + "。"
-                            
-                            print(f"[ButtonVoiceAssistant] 本地直接回复: {reply}")
-                            
-                            # 显示回复（带语音标识）
-                            if self.message_callback:
-                                self.message_callback(reply, icon="🔊")
-                            
-                            # 语音播报（加入队列顺序播放）
-                            self._queue_speak(reply)
-                            
-                            # LED恢复
-                            if self.led_controller:
-                                try:
-                                    self.led_controller.start_pattern("breath", self.led_controller.COLOR_GREEN)
-                                except:
-                                    pass
-                            return  # 跳过大模型调用
-                    except Exception as e:
-                        print(f"[ButtonVoiceAssistant] 本地处理失败: {e}")
-                    
-                    # 非数据查询问题，走大模型
+                    # 统一走大模型流程：所有问题都先发骑行数据再给LLM
+                    # 本地快捷回复仅在大模型完全不可用时作为兜底
                     print(f"[ButtonVoiceAssistant] 调用大模型: {clean_text}")
                     print(f"[ButtonVoiceAssistant] 客户端类型: {type(self.ollama_client).__name__}")
 
