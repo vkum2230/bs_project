@@ -129,7 +129,7 @@ class DataContextManager:
             "distance": sensor.distance,
             "ride_time": sensor.ride_time,
             "slope": sensor.slope,
-            "posture": sensor.posture,
+            "posture": sensor.zt_flag,
             "temperature": sensor.temperature,
             "heart_rate": sensor.heart_rate,
             "rear_dist": sensor.rear_dist,
