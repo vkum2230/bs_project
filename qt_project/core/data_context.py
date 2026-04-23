@@ -150,25 +150,19 @@ class DataContextManager:
         """注册数据更新回调"""
         self._callbacks.append(callback)
     
-    def get_system_prompt_with_context(self, base_prompt: str = None, all_fields: bool = True) -> str:
+    def get_system_prompt_with_context(self, base_prompt: str = None) -> str:
         """
-        生成带数据上下文的系统提示词
-        格式：先说明骑行场景，再列出所有实时数据，最后给出回答指令
+        生成系统提示词（不再包含实时数据，数据将放在user prompt中）
         """
-        context = self.get_context_string(all_fields=all_fields)
-
         base = base_prompt or "你是骑行助手小智，一个专业的骑行导航助手。"
 
         return f"""{base}
 
 【骑行场景】
-用户正在户外骑行，以下是该用户的实时骑行数据，数据会随着骑行过程实时更新。
-
-【实时骑行数据】
-{context}
+用户正在户外骑行。你每次回答问题时，用户都会在消息开头附上他的实时骑行数据。请严格根据这些数据回答，不要编造任何数据。
 
 【回答要求】
-1. 请严格根据上述实时数据回答用户问题，数据是实时且准确的。
+1. 请严格根据用户提供的实时数据回答，绝对不要编造任何数据。
 2. 如果用户询问具体数值（如速度、心率、功率等），请直接给出当前数值，不要绕弯子。
 3. 回答要简洁明了，适合骑行过程中听取，控制在100字以内。
 4. 不要加星号、下划线等Markdown格式符号。

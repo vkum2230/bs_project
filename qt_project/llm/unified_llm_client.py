@@ -43,18 +43,33 @@ class UnifiedLLMClient:
         return self._ollama
 
     def _inject_ride_context(self, system_prompt: str = None) -> str:
-        """注入骑行数据上下文到系统提示词"""
+        """注入骑行场景到系统提示词（数据不再放在system prompt中）"""
         try:
             from core.data_context import get_data_context
             ctx = get_data_context()
-            ride_prompt = ctx.get_system_prompt_with_context(base_prompt=system_prompt, all_fields=True)
-            print(f"[UnifiedLLM] 注入骑行数据后的 system prompt: {ride_prompt[:150]}...")
+            ride_prompt = ctx.get_system_prompt_with_context(base_prompt=system_prompt)
+            print(f"[UnifiedLLM] system prompt: {ride_prompt[:120]}...")
             return ride_prompt
         except Exception as e:
-            print(f"[UnifiedLLM] 注入骑行数据失败: {e}")
+            print(f"[UnifiedLLM] 注入system prompt失败: {e}")
             import traceback
             traceback.print_exc()
             return system_prompt or "你是骑行助手小智。"
+
+    def _build_user_prompt(self, prompt: str) -> str:
+        """在user prompt前附加实时骑行数据，确保LLM能看到"""
+        try:
+            from core.data_context import get_data_context
+            ctx = get_data_context()
+            data_str = ctx.get_context_string(all_fields=False)
+            if data_str and data_str != "暂无骑行数据。":
+                enhanced = f"{data_str}\n\n问题：{prompt}"
+                print(f"[UnifiedLLM] 增强后的user prompt: {enhanced[:120]}...")
+                return enhanced
+            return prompt
+        except Exception as e:
+            print(f"[UnifiedLLM] 构建user prompt失败: {e}")
+            return prompt
 
     def chat(self, prompt: str, system_prompt: str = None,
              max_tokens: int = 128) -> str:
@@ -64,16 +79,17 @@ class UnifiedLLMClient:
         在线 -> 百炼，离线 -> Ollama
         """
         enhanced_system = self._inject_ride_context(system_prompt)
+        enhanced_prompt = self._build_user_prompt(prompt)
 
         online = self._get_online_client()
         if online:
             print("[UnifiedLLM] 使用百炼在线模型")
-            return online.chat(prompt, system_prompt=enhanced_system, max_tokens=max_tokens)
+            return online.chat(enhanced_prompt, system_prompt=enhanced_system, max_tokens=max_tokens)
 
         offline = self._get_offline_client()
         if offline:
             print("[UnifiedLLM] 使用 Ollama 本地模型")
-            return offline.chat(prompt, system_prompt=enhanced_system, max_tokens=max_tokens)
+            return offline.chat(enhanced_prompt, system_prompt=enhanced_system, max_tokens=max_tokens)
 
         print("[UnifiedLLM] 无可用模型")
         return "抱歉，我的大脑离线了。"
@@ -89,12 +105,13 @@ class UnifiedLLMClient:
         在线 -> 百炼，离线 -> Ollama
         """
         enhanced_system = self._inject_ride_context(system_prompt)
+        enhanced_prompt = self._build_user_prompt(prompt)
 
         online = self._get_online_client()
         if online:
             print("[UnifiedLLM] 使用百炼在线模型（流式）")
             online.chat_stream(
-                prompt=prompt,
+                prompt=enhanced_prompt,
                 on_token=on_token,
                 on_complete=on_complete,
                 system_prompt=enhanced_system,
@@ -106,7 +123,7 @@ class UnifiedLLMClient:
         if offline:
             print("[UnifiedLLM] 使用 Ollama 本地模型（流式）")
             offline.chat_stream(
-                prompt=prompt,
+                prompt=enhanced_prompt,
                 on_token=on_token,
                 on_complete=on_complete,
                 system_prompt=enhanced_system,
