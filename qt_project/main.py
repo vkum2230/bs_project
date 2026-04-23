@@ -805,7 +805,6 @@ class BikeComputerPro(QWidget):
         # ==================================
 
         # 启动后 5 秒进行网络检测，无网则自动切离线
-        from PyQt5.QtCore import QTimer
         QTimer.singleShot(5000, self._verify_startup_network)
 
     def _init_ollama_client(self):
