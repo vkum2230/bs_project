@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>离线骑行地图</title>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <link rel="stylesheet" href="leaflet/leaflet.css" />
+    <script src="leaflet/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #1a1a1a;
+            overflow: hidden;
+        }
+        #container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* ========== 顶部搜索栏 ========== */
+        .search-panel {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            z-index: 2000;
+        }
+        .input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .search-input {
+            width: 420px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: #000;
+            border: 2px solid #4DB8FF;
+            border-radius: 10px;
+            padding: 12px 15px;
+            font-size: 16px;
+            outline: none;
+            height: 48px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #4DB8FF, #3A9FE0);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 48px;
+            transition: all 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-route { background: linear-gradient(135deg, #3498db, #2980b9); }
+        .btn-nav { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .btn-locate { background: linear-gradient(135deg, #9b59b6, #8e44ad); font-size: 18px; padding: 12px; }
+        .btn-stop { background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 12px; display: none; }
+        .btn-clear { background: linear-gradient(135deg, #666, #555); padding: 12px; }
+
+        /* 展开/收起按钮 */
+        .btn-toggle {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 48px;
+            transition: all 0.1s;
+            min-width: 48px;
+        }
+        .btn-toggle:active { transform: scale(0.95); }
+
+        /* 按钮面板 —— 默认收起在 》》 按钮后方 */
+        .btn-slide-group {
+            display: flex;
+            gap: 8px;
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            align-items: center;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .btn-slide-group.show {
+            max-width: 600px;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* 地图缩放按钮 */
+        .zoom-controls {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .btn-zoom {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            background: rgba(30, 30, 30, 0.95);
+            border: 2px solid #4DB8FF;
+            color: #4DB8FF;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .btn-zoom:active {
+            background: #4DB8FF;
+            color: white;
+            transform: scale(0.95);
+        }
+
+        /* 位置信息 */
+        .location-info {
+            position: absolute;
+            top: 75px;
+            left: 8px;
+            background: rgba(30, 30, 30, 0.95);
+            color: #4DB8FF;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1.5px solid #4DB8FF;
+            font-size: 12px;
+            z-index: 1000;
+        }
+
+        /* 导航面板 */
+        .nav-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 8px;
+            right: 420px;
+            background: rgba(46, 204, 113, 0.95);
+            color: white;
+            padding: 12px 15px;
+            border-radius: 12px;
+            z-index: 2500;
+            display: none;
+        }
+        .nav-instruction { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+        .nav-detail { font-size: 12px; opacity: 0.9; }
+
+        /* ========== 右侧半透明键盘 ========== */
+        .keyboard-wrapper {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 480px;
+            z-index: 3000;
+            display: none;
+        }
+        .keyboard-wrapper.active { display: block; }
+        .candidates-area {
+            background: rgba(80, 80, 80, 0.5);
+            backdrop-filter: blur(4px);
+            border-radius: 12px 12px 0 0;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-bottom: none;
+            padding: 12px 14px;
+            margin-bottom: 0;
+        }
+        .pinyin-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .pinyin-label {
+            color: #aaa;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .pinyin-text {
+            color: #4DB8FF;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .candidates-row {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            padding-bottom: 2px;
+        }
+        .candidates-row::-webkit-scrollbar { display: none; }
+        .candidate-item {
+            background: rgba(100, 100, 100, 0.7);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-size: 18px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.1s;
+            min-width: 42px;
+            text-align: center;
+        }
+        .candidate-item:hover {
+            background: rgba(77, 184, 255, 0.8);
+            border-color: #4DB8FF;
+        }
+        .candidate-item:active { transform: scale(0.95); }
+        .more-btn {
+            background: #4DB8FF !important;
+            color: #fff !important;
+            font-weight: bold;
+            min-width: 40px;
+        }
+        .keyboard-main {
+            background: rgba(70, 70, 70, 0.5);
+            backdrop-filter: blur(4px);
+            border-radius: 0 0 12px 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding: 12px 10px 14px 10px;
+        }
+        .kb-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 7px;
+            justify-content: center;
+        }
+        .key {
+            background: rgba(120, 120, 120, 0.6);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 0;
+            font-size: 18px;
+            font-weight: 500;
+            cursor: pointer;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.08s;
+            flex: 1;
+            max-width: 48px;
+        }
+        .key:hover { background: rgba(140, 140, 140, 0.7); }
+        .key:active { background: rgba(100, 100, 100, 0.8); transform: scale(0.96); }
+        .key-shift { flex: 1.3; max-width: 62px; background: rgba(100, 100, 100, 0.65); font-size: 16px; }
+        .key-back { flex: 1.3; max-width: 62px; background: rgba(110, 110, 110, 0.65); font-size: 16px; }
+        .key-space { flex: 4; max-width: 220px; font-size: 16px; background: rgba(120, 120, 120, 0.6); }
+        .key-enter { flex: 1.4; max-width: 78px; background: rgba(46, 204, 113, 0.7); font-size: 16px; color: white; font-weight: 600; }
+        .key-lang { flex: 1; max-width: 50px; font-size: 13px; background: rgba(52, 152, 219, 0.7); }
+        .row-qwerty { padding-left: 15px; padding-right: 15px; }
+        .row-asdf { padding-left: 25px; padding-right: 25px; }
+        .row-zxcv { padding-left: 10px; padding-right: 10px; }
+        .row-space { padding-left: 20px; padding-right: 20px; }
+
+        /* 离线提示 */
+        .offline-badge {
+            position: absolute;
+            top: 75px;
+            right: 8px;
+            background: rgba(231, 76, 60, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 1000;
+        }
+
+        /* Toast 提示框 */
+        .toast {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { background: rgba(231, 76, 60, 0.9); }
+        .toast.success { background: rgba(46, 204, 113, 0.9); }
+        .toast.warning { background: rgba(241, 196, 15, 0.9); }
+
+        /* Leaflet 暗黑滤镜 */
+        .leaflet-tile-pane { filter: brightness(0.7) contrast(1.1) saturate(0.8); }
+        .leaflet-container { background: #1a1a1a; }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <!-- 离线标识 -->
+    <div class="offline-badge" id="offlineBadge">离线模式</div>
+
+    <!-- 搜索面板 -->
+    <div class="search-panel">
+        <div style="position: relative;">
+            <div class="input-row">
+                <input type="text" id="searchInput" class="search-input" placeholder="点击地图选点或输入坐标 如 27.83,112.93" onclick="showKeyboard()">
+                <button class="btn btn-toggle" onclick="toggleBtnPanel()" title="展开/收起">》》</button>
+                <div id="btnPanel" class="btn-slide-group">
+                    <button class="btn btn-route" onclick="planOfflineRoute()" title="规划路线">🗺️ 路线</button>
+                    <button class="btn btn-nav" onclick="enterNavMode()" title="导航模式">🧭 导航</button>
+                    <button class="btn-zoom" onclick="zoomIn()" title="放大">+</button>
+                    <button class="btn-zoom" onclick="zoomOut()" title="缩小">−</button>
+                    <button class="btn btn-locate" onclick="showCurrentLocation()" title="当前位置">📍</button>
+                    <button class="btn btn-clear" onclick="clearAll()" title="清除">🗑️</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导航面板 -->
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-instruction" id="navInstruction">准备出发</div>
+        <div class="nav-detail" id="navDetail">--</div>
+    </div>
+
+    <!-- 键盘 -->
+    <div class="keyboard-wrapper" id="keyboard">
+        <div class="candidates-area">
+            <div class="pinyin-row">
+                <span class="pinyin-label">拼音</span>
+                <span id="pinyinText" class="pinyin-text"></span>
+            </div>
+            <div id="candidatesContainer" class="candidates-row"></div>
+        </div>
+        <div class="keyboard-main">
+            <div class="kb-row row-qwerty">
+                <button class="key" onclick="inputChar('q')">Q</button>
+                <button class="key" onclick="inputChar('w')">W</button>
+                <button class="key" onclick="inputChar('e')">E</button>
+                <button class="key" onclick="inputChar('r')">R</button>
+                <button class="key" onclick="inputChar('t')">T</button>
+                <button class="key" onclick="inputChar('y')">Y</button>
+                <button class="key" onclick="inputChar('u')">U</button>
+                <button class="key" onclick="inputChar('i')">I</button>
+                <button class="key" onclick="inputChar('o')">O</button>
+                <button class="key" onclick="inputChar('p')">P</button>
+            </div>
+            <div class="kb-row row-asdf">
+                <button class="key" onclick="inputChar('a')">A</button>
+                <button class="key" onclick="inputChar('s')">S</button>
+                <button class="key" onclick="inputChar('d')">D</button>
+                <button class="key" onclick="inputChar('f')">F</button>
+                <button class="key" onclick="inputChar('g')">G</button>
+                <button class="key" onclick="inputChar('h')">H</button>
+                <button class="key" onclick="inputChar('j')">J</button>
+                <button class="key" onclick="inputChar('k')">K</button>
+                <button class="key" onclick="inputChar('l')">L</button>
+            </div>
+            <div class="kb-row row-zxcv">
+                <button class="key key-shift" onclick="toggleShift()">⇧</button>
+                <button class="key" onclick="inputChar('z')">Z</button>
+                <button class="key" onclick="inputChar('x')">X</button>
+                <button class="key" onclick="inputChar('c')">C</button>
+                <button class="key" onclick="inputChar('v')">V</button>
+                <button class="key" onclick="inputChar('b')">B</button>
+                <button class="key" onclick="inputChar('n')">N</button>
+                <button class="key" onclick="inputChar('m')">M</button>
+                <button class="key key-back" onclick="handleBackspace()">⌫</button>
+            </div>
+            <div class="kb-row row-space">
+                <button class="key key-lang" onclick="toggleLang()">中/英</button>
+                <button class="key key-space" onclick="inputChar(' ')">空格</button>
+                <button class="key key-enter" onclick="confirmInput()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        var map, currentPos, destPos, currentMarker, destMarker, trackLine, yawMarker;
+        var isNavigating = false, routeInfo = null, trackPoints = [];
+        var pinyinBuffer = "";
+        var isShiftOn = false;
+        var isChineseMode = true;
+        var amapAPI = null;
+        var pinyinHandler = null;
+        var navHandler = null;
+        var isMapInitialized = false;
+        var pendingYaw = null;
+        var routeLine = null;
+        var offlineRouteShape = [];
+        var offlineManeuvers = [];
+
+        // DOM 加载完成后初始化
+        document.addEventListener("DOMContentLoaded", function() {
+            console.log('DOM 加载完成');
+            initAll();
+        });
+
+        function initAll() {
+            initMap();
+
+            // 连接 QWebChannel
+            if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    amapAPI = channel.objects.amapAPI;
+                    pinyinHandler = channel.objects.pinyinHandler;
+                    navHandler = channel.objects.navHandler;
+                    console.log('QWebChannel 连接成功');
+                });
+            } else {
+                console.error('QWebChannel 未就绪');
+            }
+
+            document.addEventListener('click', function(e) {
+                var kb = document.getElementById('keyboard');
+                var input = document.getElementById('searchInput');
+                if (!kb || !kb.classList.contains('active')) return;
+                if (kb.contains(e.target) || input.contains(e.target)) return;
+                hideKeyboard();
+            });
+        }
+
+        function initMap() {
+            if (isMapInitialized) return;
+
+            try {
+                console.log('开始初始化离线地图...');
+
+                map = L.map('container', {
+                    zoomControl: false,
+                    attributionControl: false
+                }).setView([27.828, 112.944], 16);
+
+                L.tileLayer('http://localhost:8766/{z}/{x}/{y}.png', {
+                    minZoom: 13,
+                    maxZoom: 16,
+                    tileSize: 256
+                }).addTo(map);
+
+                // 比例尺
+                L.control.scale({position: 'bottomleft', metric: true, imperial: false}).addTo(map);
+
+                currentPos = null;
+                isMapInitialized = true;
+                console.log('离线地图初始化完成');
+
+                // 地图点击选点作为目的地
+                map.on('click', function(e) {
+                    var lat = e.latlng.lat;
+                    var lng = e.latlng.lng;
+                    destPos = [lng, lat];
+                    if (destMarker) map.removeLayer(destMarker);
+                    destMarker = L.marker([lat, lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;">终</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        })
+                    }).addTo(map);
+                    document.getElementById('searchInput').value = lat.toFixed(5) + ',' + lng.toFixed(5);
+                    showToast('已设置目的地: ' + lat.toFixed(5) + ',' + lng.toFixed(5), 'success');
+                });
+
+                // 通知 Python
+                if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+                    setTimeout(function() {
+                        if (amapAPI) {
+                            amapAPI.report_map_status(true);
+                        }
+                    }, 500);
+                }
+            } catch (e) {
+                console.error('地图初始化失败:', e);
+                document.getElementById('container').innerHTML =
+                    '<div style="color: red; padding: 20px; text-align: center;">' +
+                    '<h3>离线地图加载失败</h3><p>' + e.message + '</p></div>';
+                if (amapAPI) {
+                    amapAPI.report_map_status(false);
+                }
+            }
+        }
+
+        // ========== 位置更新 ==========
+        window.updatePosition = function(lon, lat, province) {
+            if (!map) return;
+            console.log('更新位置:', lon, lat, province);
+            currentPos = [lat, lon];
+
+            // 移动地图中心
+            map.panTo([lat, lon]);
+
+            // 添加/更新定位标记
+            var arrowHtml = '<div id="yaw-arrow" style="width:48px;height:48px;transform-origin:center center;">' +
+                '<svg width="48" height="48" viewBox="0 0 48 48">' +
+                '<circle cx="24" cy="24" r="8" fill="#4DB8FF" stroke="white" stroke-width="2"/>' +
+                '<path d="M24 4 L34 24 L24 20 L14 24 Z" fill="#4DB8FF" stroke="white" stroke-width="2"/>' +
+                '</svg></div>';
+
+            if (!currentMarker) {
+                currentMarker = L.marker([lat, lon], {
+                    icon: L.divIcon({
+                        html: arrowHtml,
+                        className: '',
+                        iconSize: [48, 48],
+                        iconAnchor: [24, 24]
+                    })
+                }).addTo(map);
+            } else {
+                currentMarker.setLatLng([lat, lon]);
+            }
+
+
+            if (pendingYaw !== null) {
+                updateYaw(pendingYaw);
+                pendingYaw = null;
+            }
+        };
+
+        // ========== 航偏角更新 ==========
+        window.updateYaw = function(angle) {
+            if (!currentMarker) {
+                pendingYaw = angle;
+                return;
+            }
+            var el = document.getElementById('yaw-arrow');
+            if (el) {
+                el.style.transform = 'rotate(' + angle + 'deg)';
+            }
+        };
+
+        // ========== 缩放控制 ==========
+        window.zoomIn = function() {
+            if (map) map.zoomIn();
+        };
+        window.zoomOut = function() {
+            if (map) map.zoomOut();
+        };
+
+        // ========== 当前位置 ==========
+        window.showCurrentLocation = function() {
+            if (currentPos) {
+                map.setView(currentPos, 16);
+                showToast('已定位到当前位置', 'success');
+            } else {
+                showToast('当前位置未知', 'warning');
+            }
+        };
+
+        // ========== 导航模式（离线简化版：直线导航） ==========
+        window.enterNavMode = function() {
+            if (!currentPos || !destPos) {
+                showToast('请先设置目的地', 'warning');
+                return;
+            }
+            isNavigating = true;
+            document.getElementById('navPanel').style.display = 'block';
+            var stopBtn = document.querySelector('.btn-stop');
+            if (stopBtn) stopBtn.style.display = 'inline-block';
+            showToast('开始导航（离线模式）', 'success');
+            // 通知 Python 开始导航（Python 会负责绘制路线、zoom、语音播报）
+            if (amapAPI) amapAPI.start_offline_navigation(destPos[1], destPos[0]);
+        };
+
+        window.stopNavigation = function() {
+            isNavigating = false;
+            document.getElementById('navPanel').style.display = 'none';
+            var stopBtn = document.querySelector('.btn-stop');
+            if (stopBtn) stopBtn.style.display = 'none';
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+            offlineRouteShape = [];
+            offlineManeuvers = [];
+            if (navHandler) navHandler.on_nav_stopped();
+        };
+
+        window.drawRouteLine = function() {
+            if (!currentPos || !destPos || !map) return;
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+            routeLine = L.polyline([
+                [currentPos[0], currentPos[1]],
+                [destPos[1], destPos[0]]
+            ], {
+                color: '#4DB8FF',
+                weight: 5,
+                opacity: 0.8,
+                dashArray: '10, 10'
+            }).addTo(map);
+        };
+
+        // 绘制 Valhalla 离线路线
+        window.drawOfflineRoute = function(shape, maneuvers) {
+            if (!map || !shape || shape.length < 2) return;
+            offlineRouteShape = shape;
+            offlineManeuvers = maneuvers || [];
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+            // 绘制路线
+            routeLine = L.polyline(shape, {
+                color: '#2ecc71',
+                weight: 6,
+                opacity: 0.9
+            }).addTo(map);
+            // 适应视野
+            var bounds = L.latLngBounds(shape);
+            map.fitBounds(bounds, {padding: [40, 40]});
+            console.log('离线路线绘制完成，共' + shape.length + '个点，' + offlineManeuvers.length + '个导航指令');
+        };
+
+        // ========== 清除 ==========
+        window.clearAll = function() {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+            if (destMarker) {
+                map.removeLayer(destMarker);
+                destMarker = null;
+            }
+            if (window.historyLine) {
+                map.removeLayer(window.historyLine);
+                window.historyLine = null;
+            }
+            if (window.historyStartMarker) {
+                map.removeLayer(window.historyStartMarker);
+                window.historyStartMarker = null;
+            }
+            if (window.historyEndMarker) {
+                map.removeLayer(window.historyEndMarker);
+                window.historyEndMarker = null;
+            }
+            offlineRouteShape = [];
+            offlineManeuvers = [];
+            stopNavigation();
+            destPos = null;
+        };
+
+        // ========== 工具函数 ==========
+        function formatDist(m) {
+            if (m >= 1000) return (m / 1000).toFixed(1) + '公里';
+            return Math.round(m) + '米';
+        }
+        function formatTime(s) {
+            if (s >= 3600) return Math.floor(s / 3600) + '小时' + Math.floor((s % 3600) / 60) + '分';
+            return Math.floor(s / 60) + '分钟';
+        }
+
+        // ========== 键盘输入 ==========
+        function inputChar(char) {
+            if (isShiftOn && char >= 'a' && char <= 'z') {
+                char = char.toUpperCase();
+            }
+            if (char >= 'a' && char <= 'z' && isChineseMode) {
+                pinyinBuffer += char;
+                updatePinyinDisplay();
+                fetchCandidates();
+            } else {
+                var input = document.getElementById('searchInput');
+                input.value += char;
+                clearPinyinState();
+            }
+        }
+        function updatePinyinDisplay() {
+            var text = document.getElementById('pinyinText');
+            text.textContent = pinyinBuffer;
+        }
+        function clearPinyinState() {
+            pinyinBuffer = "";
+            updatePinyinDisplay();
+            document.getElementById('candidatesContainer').innerHTML = '';
+        }
+        function fetchCandidates(page) {
+            if (page === undefined) page = 0;
+            if (pinyinHandler) {
+                pinyinHandler.get_candidates(pinyinBuffer, page).then(function(result) {
+                    showCandidates(result);
+                }).catch(function(err) {
+                    console.error('获取候选词失败:', err);
+                });
+            }
+        }
+        function showCandidates(result) {
+            var container = document.getElementById('candidatesContainer');
+            container.innerHTML = '';
+            if (!result || !result.candidates) return;
+            result.candidates.forEach(function(c, i) {
+                var span = document.createElement('span');
+                span.className = 'candidate-item';
+                span.textContent = c;
+                span.onclick = function(e) { e.stopPropagation(); selectCandidate(c); };
+                container.appendChild(span);
+            });
+            if (result.has_more) {
+                var more = document.createElement('span');
+                more.className = 'candidate-item more-btn';
+                more.textContent = '>';
+                more.onclick = function(e) { e.stopPropagation(); fetchCandidates(result.page + 1); };
+                container.appendChild(more);
+            }
+        }
+        function selectCandidate(char) {
+            var input = document.getElementById('searchInput');
+            input.value += char;
+            clearPinyinState();
+            showKeyboard();
+        }
+        function handleBackspace() {
+            var input = document.getElementById('searchInput');
+            if (pinyinBuffer.length > 0) {
+                pinyinBuffer = pinyinBuffer.slice(0, -1);
+                updatePinyinDisplay();
+                fetchCandidates();
+            } else {
+                input.value = input.value.slice(0, -1);
+            }
+        }
+        function toggleShift() { isShiftOn = !isShiftOn; }
+        function toggleLang() { isChineseMode = !isChineseMode; clearPinyinState(); }
+        function confirmInput() {
+            hideKeyboard();
+            var val = document.getElementById('searchInput').value.trim();
+            if (!val) return;
+            var parts = val.split(/[,， ]+/);
+            if (parts.length >= 2) {
+                var lat = parseFloat(parts[0]);
+                var lon = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                    destPos = [lon, lat];
+                    if (destMarker) map.removeLayer(destMarker);
+                    destMarker = L.marker([lat, lon], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;">终</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        })
+                    }).addTo(map);
+                    showToast('目的地已设置: ' + lat.toFixed(5) + ',' + lon.toFixed(5), 'success');
+                    return;
+                }
+            }
+            showToast('坐标格式错误，请使用 纬度,经度 如 27.83,112.93', 'warning');
+        }
+
+        function planOfflineRoute() {
+            var val = document.getElementById('searchInput').value.trim();
+            if (!val) {
+                showToast('请先输入目的地坐标或点击地图选点', 'warning');
+                return;
+            }
+            var parts = val.split(/[,， ]+/);
+            if (parts.length >= 2) {
+                var lat = parseFloat(parts[0]);
+                var lon = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                    if (amapAPI) {
+                        showToast('正在规划离线路线...', 'info');
+                        amapAPI.plan_offline_route(lat, lon);
+                    } else {
+                        showToast('QWebChannel 未就绪', 'error');
+                    }
+                    return;
+                }
+            }
+            showToast('坐标格式错误，请使用 纬度,经度 如 27.83,112.93', 'warning');
+        }
+
+        function showKeyboard() {
+            document.getElementById('keyboard').classList.add('active');
+        }
+        function hideKeyboard() {
+            document.getElementById('keyboard').classList.remove('active');
+            clearPinyinState();
+        }
+
+        function toggleBtnPanel() {
+            var panel = document.getElementById('btnPanel');
+            panel.classList.toggle('show');
+        }
+
+        // ========== Toast ==========
+        function showToast(message, type, duration) {
+            if (duration === undefined) duration = 2500;
+            var toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, duration);
+        }
+    </script>
+    <div id="toast" class="toast"></div>
+</body>
+</html>

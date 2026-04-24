@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QHBoxLayout, QFrame, QPushButton, QStackedWidget,
                              QGridLayout, QSizePolicy, QWidget)
 from PyQt5.QtCore import QTimer, QDateTime, Qt
-from PyQt5.QtGui import QFont, QPixmap, QCursor
+from PyQt5.QtGui import QFont, QCursor
 
 os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
 
@@ -49,8 +49,6 @@ class BikeComputerPro(QWidget):
 
         self.base_path = os.path.dirname(os.path.abspath(__file__))
         self.icons_path = os.path.join(self.base_path, "TuBiao")
-        self.wifi_on_path = os.path.join(self.icons_path, "wifi_on.png")
-        self.wifi_off_path = os.path.join(self.icons_path, "wifi_off.png")
 
         # ========== 高德地图配置 ==========
         # 高德地图 API Key 配置
@@ -386,19 +384,17 @@ class BikeComputerPro(QWidget):
         self.right_container = QWidget()
         self.right_layout = QHBoxLayout(self.right_container)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(20)
         self.right_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.zt_status_label = QLabel("正常骑行")
-        self.zt_status_label.setStyleSheet("color: #2ecc71; background: transparent; margin-right: 10px;")
+        self.zt_status_label.setStyleSheet("color: #2ecc71; background: transparent;")
         self.zt_status_label.setFont(QFont("Helvetica", 12, QFont.Bold))
 
         self.heading_label = QLabel("")
-        self.heading_label.setStyleSheet("color: #4DB8FF; background: transparent; margin-right: 10px;")
+        self.heading_label.setStyleSheet("color: #4DB8FF; background: transparent;")
         self.heading_label.setFont(QFont("Helvetica", 11, QFont.Bold))
-
-        self.wifi_icon_label = QLabel()
-        self.wifi_icon_label.setFixedSize(36, 22)
-        self.wifi_icon_label.setStyleSheet("background: transparent; margin-right: 8px;")
+        self.heading_label.hide()  # 初始为空，避免占据间距
 
         # 在线/离线地图切换按钮
         self.btn_map_mode = QPushButton("在线")
@@ -417,7 +413,6 @@ class BikeComputerPro(QWidget):
         self.right_layout.addWidget(self.zt_status_label)
         self.right_layout.addWidget(self.heading_label)
         self.right_layout.addWidget(self.btn_map_mode)
-        self.right_layout.addWidget(self.wifi_icon_label)
         self.right_layout.addWidget(self.time_label)
 
         self.status_layout.addWidget(self.left_container, 1)
@@ -788,8 +783,7 @@ class BikeComputerPro(QWidget):
         # 定时器
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_info)
-        self.timer.start(1000) 
-        self.wifi_counter = 0
+        self.timer.start(1000)
 
         # 串口读取
         self.serial_worker = SerialReader(port='/dev/ttyAMA2')
@@ -1261,7 +1255,7 @@ class BikeComputerPro(QWidget):
             }
             text, color = zt_map.get(zt, (f"状态 {zt}", "#FFFFFF"))
             self.zt_status_label.setText(text)
-            self.zt_status_label.setStyleSheet(f"color: {color}; background: transparent; margin-right: 10px;")
+            self.zt_status_label.setStyleSheet(f"color: {color}; background: transparent;")
 
         if "yaw" in data:
             yaw_val = float(data["yaw"])
@@ -1325,23 +1319,8 @@ class BikeComputerPro(QWidget):
             self.dialog_msg.setText(f"📍 {province} · {lat:.4f}°N {lon:.4f}°E")
 
 
-    def check_wifi(self):
-        try:
-            socket.setdefaulttimeout(0.5)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
-            return True
-        except: 
-            return False
-
     def update_info(self):
         self.time_label.setText(QDateTime.currentDateTime().toString("hh:mm"))
-        if self.wifi_counter % 5 == 0:
-            image_path = self.wifi_on_path if self.check_wifi() else self.wifi_off_path
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(self.wifi_icon_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.wifi_icon_label.setPixmap(scaled)
-        self.wifi_counter += 1
 
     def on_nav_status_changed(self, status):
         """导航状态变化回调"""

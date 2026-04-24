@@ -1,9 +1,10 @@
-# Large binaries
+# Large binaries / models
 *.gguf
 *.tgz
 *.tar.gz
 *.zip
 *.bin
+*.onnx
 
 # Python cache
 __pycache__/
@@ -19,3 +20,12 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts & dependencies
+qt_project/valhalla/
+qt_project/valhalla_deps/
+
+# Offline map tiles (large generated data)
+qt_project/maps/osm/
+qt_project/maps/valhalla_data/
+qt_project/maps/xiangtan_tiles/
