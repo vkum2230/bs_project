@@ -141,10 +141,10 @@ class DataContextManager:
         with self._data_lock:
             return RideData(**self._data.to_dict())
     
-    def get_context_string(self) -> str:
+    def get_context_string(self, all_fields: bool = False) -> str:
         """获取数据上下文描述"""
         with self._data_lock:
-            return self._data.to_context_string()
+            return self._data.to_context_string(all_fields=all_fields)
     
     def register_callback(self, callback):
         """注册数据更新回调"""
