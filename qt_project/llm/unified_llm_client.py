@@ -61,14 +61,20 @@ class UnifiedLLMClient:
         try:
             from core.data_context import get_data_context
             ctx = get_data_context()
+            d = ctx.get_data()
+            print(f"[UnifiedLLM] DataContext原始值 -> speed={d.speed}, power={d.power}, cadence={d.cadence}, hr={d.heart_rate}")
             data_str = ctx.get_context_string(all_fields=False)
+            print(f"[UnifiedLLM] context_string结果 -> {data_str}")
             if data_str and data_str != "暂无骑行数据。":
                 enhanced = f"{data_str}\n\n问题：{prompt}"
-                print(f"[UnifiedLLM] 增强后的user prompt: {enhanced[:120]}...")
+                print(f"[UnifiedLLM] 完整增强prompt:\n{enhanced}")
                 return enhanced
+            print("[UnifiedLLM] 数据为空，使用原始prompt")
             return prompt
         except Exception as e:
             print(f"[UnifiedLLM] 构建user prompt失败: {e}")
+            import traceback
+            traceback.print_exc()
             return prompt
 
     def chat(self, prompt: str, system_prompt: str = None,

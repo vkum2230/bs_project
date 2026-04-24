@@ -1202,6 +1202,9 @@ class BikeComputerPro(QWidget):
             get_data_context().update_from_sensor(sensor)
             # 保存到文件，供LLM读取
             get_data_context().save_to_file()
+            # DEBUG: 确认DataContextManager中的实际数据
+            d = get_data_context().get_data()
+            print(f"[Main] DataContext 更新后 -> speed={d.speed}, power={d.power}, cadence={d.cadence}, hr={d.heart_rate}")
             # 推送到通信服务（由 CommService 决定何时发给 App）
             self.comm_service.on_sensor_data(sensor)
             # 推送到骑行服务

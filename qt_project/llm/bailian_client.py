@@ -111,7 +111,7 @@ class BailianClient:
             try:
                 messages = self._build_messages(prompt, system_prompt)
                 print(f"[BailianClient] 请求消息: {json.dumps(messages, ensure_ascii=False)}")
-                print(f"[BailianClient] 开始流式请求，模型: {self.model}, 提示: {prompt[:30]}...")
+                print(f"[BailianClient] 开始流式请求，模型: {self.model}, 提示前100字: {prompt[:100]}...")
                 data = {
                     "model": self.model,
                     "messages": messages,
