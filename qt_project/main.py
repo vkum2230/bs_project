@@ -963,14 +963,15 @@ class BikeComputerPro(QWidget):
         self.btn_settings.setStyleSheet(self.inactive_style)
 
     def show_map_page(self):
+        is_first_visit = not self._map_page_visited
         self._map_page_visited = True
         self.stacked_widget.setCurrentIndex(1)
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.active_style)
         self.btn_history.setStyleSheet(self.inactive_style)
         self.btn_settings.setStyleSheet(self.inactive_style)
-        # 如果地图已在后台加载完成，立即播报加载成功
-        if self.page_map.is_map_loaded():
+        # 只有第一次切换到地图页面时才播报加载成功
+        if is_first_visit and self.page_map.is_map_loaded():
             self.on_map_loaded(True)
 
     def show_history_page(self):
