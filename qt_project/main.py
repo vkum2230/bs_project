@@ -961,7 +961,7 @@ class BikeComputerPro(QWidget):
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.inactive_style)
         self.btn_settings.setStyleSheet(self.inactive_style)
-        self.page_map.clear_track()
+        self.page_map.clear_visuals_only()
 
     def show_map_page(self):
         self._map_page_visited = True
@@ -980,7 +980,7 @@ class BikeComputerPro(QWidget):
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.active_style)
         self.btn_settings.setStyleSheet(self.inactive_style)
-        self.page_map.clear_track()
+        self.page_map.clear_visuals_only()
         self.page_history.refresh_list()
 
     def show_settings_page(self):
@@ -989,7 +989,7 @@ class BikeComputerPro(QWidget):
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.inactive_style)
         self.btn_settings.setStyleSheet(self.active_style)
-        self.page_map.clear_track()
+        self.page_map.clear_visuals_only()
 
     def _check_network(self) -> bool:
         """检查网络连接（多地址容错）"""

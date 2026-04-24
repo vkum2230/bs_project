@@ -2842,12 +2842,20 @@ class MapWidget(QWidget):
             routeInfo = null;
             navSteps = [];
             currentNavStep = 0;
-            
+
             // 停止导航监控
             stopNavMonitoring();
-            
+
+            // 恢复导航按钮为"开始导航"
+            var navBtn = document.querySelector('.btn-nav');
+            if (navBtn) {{
+                navBtn.innerHTML = '🧭 导航';
+                navBtn.onclick = enterNavMode;
+                navBtn.title = '导航模式';
+            }}
+
             document.getElementById('navPanel').style.display = 'none';
-            
+
             // 重置地图旋转
             map.setRotation(0);
             
@@ -2882,19 +2890,18 @@ class MapWidget(QWidget):
             if (window.navStraightLine) {{ map.remove(window.navStraightLine); window.navStraightLine = null; }}
         }}
 
-        function clearAll() {{
-            stopNavigation();
-
+        function clearVisualsOnly() {{
+            // 只清除地图视觉元素，不停止导航
             // 清除路线
             if (window.routeLine) {{ map.remove(window.routeLine); window.routeLine = null; }}
             if (window.navStraightLine) {{ map.remove(window.navStraightLine); window.navStraightLine = null; }}
-            
+
             // 清除路线箭头标记
             if (window.routeArrowMarkers) {{
                 window.routeArrowMarkers.forEach(function(m) {{ map.remove(m); }});
                 window.routeArrowMarkers = [];
             }}
-            
+
             // 清除所有标记
             if (window.startMarker) {{ map.remove(window.startMarker); window.startMarker = null; }}
             if (window.endMarker) {{ map.remove(window.endMarker); window.endMarker = null; }}
@@ -2911,9 +2918,14 @@ class MapWidget(QWidget):
             window.routeStartPos = null;
             window.routePoints = null;
             window.navRouteIndex = 0;
-            
+
             document.getElementById('searchInput').value = '';
             clearPinyinState();
+        }}
+
+        function clearAll() {{
+            stopNavigation();
+            clearVisualsOnly();
         }}
         
         function formatDist(m) {{
@@ -3102,6 +3114,13 @@ class MapWidget(QWidget):
                 doNavigate().then(function() {{
                     startNavUI();
                     startNavMonitoring();
+                    // 修改按钮为"结束导航"
+                    var navBtn = document.querySelector('.btn-nav');
+                    if (navBtn) {{
+                        navBtn.innerHTML = '⏹ 结束导航';
+                        navBtn.onclick = function() {{ stopNavigation(); }};
+                        navBtn.title = '结束导航';
+                    }}
                 }}).catch(function(err) {{
                     showToast('路线规划失败，无法进入导航模式', 'error');
                 }});
@@ -3109,6 +3128,13 @@ class MapWidget(QWidget):
                 // 路线已规划好，直接进入导航
                 startNavUI();
                 startNavMonitoring();
+                // 修改按钮为"结束导航"
+                var navBtn = document.querySelector('.btn-nav');
+                if (navBtn) {{
+                    navBtn.innerHTML = '⏹ 结束导航';
+                    navBtn.onclick = function() {{ stopNavigation(); }};
+                    navBtn.title = '结束导航';
+                }}
             }}
         }}
         
@@ -3825,6 +3851,13 @@ class MapWidget(QWidget):
             document.getElementById('navPanel').style.display = 'block';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'inline-block';
+            // 修改按钮为"结束导航"
+            var navBtn = document.querySelector('.btn-nav');
+            if (navBtn) {{
+                navBtn.innerHTML = '⏹ 结束导航';
+                navBtn.onclick = window.stopNavigation;
+                navBtn.title = '结束导航';
+            }}
             showToast('开始导航（离线模式）', 'success');
             // 通知 Python 开始导航（Python 会负责绘制路线、zoom、语音播报）
             if (amapAPI) amapAPI.start_offline_navigation(destPos[1], destPos[0]);
@@ -3841,6 +3874,13 @@ class MapWidget(QWidget):
             }}
             offlineRouteShape = [];
             offlineManeuvers = [];
+            // 恢复导航按钮为"开始导航"
+            var navBtn = document.querySelector('.btn-nav');
+            if (navBtn) {{
+                navBtn.innerHTML = '🧭 导航';
+                navBtn.onclick = window.enterNavMode;
+                navBtn.title = '导航模式';
+            }}
             if (navHandler) navHandler.on_nav_stopped();
         }};
 
@@ -3881,7 +3921,7 @@ class MapWidget(QWidget):
         }};
 
         // ========== 清除 ==========
-        window.clearAll = function() {{
+        window.clearVisualsOnly = function() {{
             if (routeLine) {{
                 map.removeLayer(routeLine);
                 routeLine = null;
@@ -3904,8 +3944,12 @@ class MapWidget(QWidget):
             }}
             offlineRouteShape = [];
             offlineManeuvers = [];
-            stopNavigation();
             destPos = null;
+        }};
+
+        window.clearAll = function() {{
+            stopNavigation();
+            window.clearVisualsOnly();
         }};
 
         // ========== 工具函数 ==========
@@ -4377,6 +4421,10 @@ class MapWidget(QWidget):
 
     def clear_track(self):
         self.web_view.page().runJavaScript("clearAll();")
+
+    def clear_visuals_only(self):
+        """只清除地图视觉元素，不停止导航（用于页面切换）"""
+        self.web_view.page().runJavaScript("clearVisualsOnly();")
 
     def load_history_track(self, track_points):
         """
