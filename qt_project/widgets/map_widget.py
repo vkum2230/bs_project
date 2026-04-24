@@ -2837,14 +2837,23 @@ class MapWidget(QWidget):
             }}
         }}
         
-        function stopNavigation() {{
+        function stopNavigation(silent) {{
             isNavigating = false;
             routeInfo = null;
             navSteps = [];
             currentNavStep = 0;
 
-            // 停止导航监控
-            stopNavMonitoring();
+            // 停止导航监控（silent=true时不发射信号，不播报）
+            if (!silent) {{
+                stopNavMonitoring();
+            }} else {{
+                if (navMonitorTimer) {{
+                    clearInterval(navMonitorTimer);
+                    navMonitorTimer = null;
+                }}
+                currentNavStep = 0;
+                navSteps = [];
+            }}
 
             // 恢复导航按钮为"开始导航"
             var navBtn = document.querySelector('.btn-nav');
@@ -2858,10 +2867,10 @@ class MapWidget(QWidget):
 
             // 重置地图旋转
             map.setRotation(0);
-            
+
             // 重置导航状态
             window.navRouteIndex = 0;
-            
+
             // 移除蓝色导航箭头、导航直线，恢复普通位置标记
             if (window.navArrowMarker) {{
                 map.remove(window.navArrowMarker);
@@ -2924,7 +2933,7 @@ class MapWidget(QWidget):
         }}
 
         function clearAll() {{
-            stopNavigation();
+            stopNavigation(true);  // silent=true: 不播报导航结束
             clearVisualsOnly();
         }}
         
@@ -3863,7 +3872,7 @@ class MapWidget(QWidget):
             if (amapAPI) amapAPI.start_offline_navigation(destPos[1], destPos[0]);
         }};
 
-        window.stopNavigation = function() {{
+        window.stopNavigation = function(silent) {{
             isNavigating = false;
             document.getElementById('navPanel').style.display = 'none';
             var stopBtn = document.querySelector('.btn-stop');
@@ -3881,7 +3890,7 @@ class MapWidget(QWidget):
                 navBtn.onclick = window.enterNavMode;
                 navBtn.title = '导航模式';
             }}
-            if (navHandler) navHandler.on_nav_stopped();
+            if (!silent && navHandler) navHandler.on_nav_stopped();
         }};
 
         window.drawRouteLine = function() {{
@@ -3948,7 +3957,7 @@ class MapWidget(QWidget):
         }};
 
         window.clearAll = function() {{
-            stopNavigation();
+            stopNavigation(true);  // silent=true: 不播报导航结束
             window.clearVisualsOnly();
         }};
 
