@@ -4,7 +4,7 @@
 用户配置管理器 (ConfigManager)
 
 职责：
-- 保存用户偏好：心率上限、年龄、体重、单位、告警开关等
+- 保存用户偏好：心率上限、心率下限、体重、单位、告警开关等
 - 单例模式，启动时自动加载，修改后自动持久化
 - JSON 文件存储在 ~/smartride/config.json
 """
@@ -22,7 +22,6 @@ class ConfigManager:
     DEFAULTS: Dict[str, Any] = {
         "heart_rate_max": 180,
         "heart_rate_min": 50,
-        "age": 30,
         "weight_kg": 70,
         "rear_dist_alert_m": 5.0,
         "unit_system": "metric",  # metric / imperial

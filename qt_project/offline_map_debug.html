@@ -581,12 +581,19 @@
             document.getElementById('navPanel').style.display = 'block';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'inline-block';
+            // 修改按钮为"结束导航"
+            var navBtn = document.querySelector('.btn-nav');
+            if (navBtn) {
+                navBtn.innerHTML = '⏹ 结束导航';
+                navBtn.onclick = window.stopNavigation;
+                navBtn.title = '结束导航';
+            }
             showToast('开始导航（离线模式）', 'success');
             // 通知 Python 开始导航（Python 会负责绘制路线、zoom、语音播报）
             if (amapAPI) amapAPI.start_offline_navigation(destPos[1], destPos[0]);
         };
 
-        window.stopNavigation = function() {
+        window.stopNavigation = function(silent) {
             isNavigating = false;
             document.getElementById('navPanel').style.display = 'none';
             var stopBtn = document.querySelector('.btn-stop');
@@ -597,7 +604,14 @@
             }
             offlineRouteShape = [];
             offlineManeuvers = [];
-            if (navHandler) navHandler.on_nav_stopped();
+            // 恢复导航按钮为"开始导航"
+            var navBtn = document.querySelector('.btn-nav');
+            if (navBtn) {
+                navBtn.innerHTML = '🧭 导航';
+                navBtn.onclick = window.enterNavMode;
+                navBtn.title = '导航模式';
+            }
+            if (!silent && navHandler) navHandler.on_nav_stopped();
         };
 
         window.drawRouteLine = function() {
@@ -637,7 +651,7 @@
         };
 
         // ========== 清除 ==========
-        window.clearAll = function() {
+        window.clearVisualsOnly = function() {
             if (routeLine) {
                 map.removeLayer(routeLine);
                 routeLine = null;
@@ -660,8 +674,12 @@
             }
             offlineRouteShape = [];
             offlineManeuvers = [];
-            stopNavigation();
             destPos = null;
+        };
+
+        window.clearAll = function() {
+            stopNavigation(true);  // silent=true: 不播报导航结束
+            window.clearVisualsOnly();
         };
 
         // ========== 工具函数 ==========

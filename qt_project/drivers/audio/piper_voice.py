@@ -349,7 +349,8 @@ class HybridVoicePlayer:
                 if piper_available:
                     print("[HybridVoice] 尝试 Piper 离线播报...")
                     try:
-                        result = self._offline_player.speak(text, block=True, show_in_ui=show_in_ui)
+                        # UI 回调已由 HybridVoicePlayer 统一处理，离线播放器不重复显示
+                        result = self._offline_player.speak(text, block=True, show_in_ui=False)
                         if result:
                             print("[HybridVoice] ✓ Piper 离线播报成功")
                             return True

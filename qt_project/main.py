@@ -1053,10 +1053,16 @@ class BikeComputerPro(QWidget):
         if self._global_online_mode:
             # 在线 → 离线：直接切换
             self.set_global_online_mode(False)
+            self.add_voice_message("切换至离线状态", icon="🌐")
+            if self.voice_player:
+                self.voice_player.speak("切换至离线状态", show_in_ui=False)
         else:
             # 离线 → 在线：先检查网络
             if self._check_network():
                 self.set_global_online_mode(True)
+                self.add_voice_message("切换至在线状态", icon="🌐")
+                if self.voice_player:
+                    self.voice_player.speak("切换至在线状态", show_in_ui=False)
             else:
                 print("[Main] 无网络，拒绝切换到在线模式")
                 self.add_voice_message("当前无网络，无法切换在线模式", icon="⚠️")
@@ -1078,27 +1084,19 @@ class BikeComputerPro(QWidget):
             self.voice_player.speak("网络异常，已自动切换至离线地图", show_in_ui=False)
 
     def _on_map_mode_changed(self, mode: str):
-        """地图模式切换后的回调"""
+        """地图模式切换后的回调——仅更新按钮 UI，语音消息由调用方（_toggle_map_mode / _on_online_fallback / _verify_startup_network）负责"""
         if mode == "offline":
             self.btn_map_mode.setText("离线")
             self.btn_map_mode.setStyleSheet(
                 "QPushButton { background-color: #e74c3c; color: #FFFFFF; border-radius: 6px; }"
                 "QPushButton:pressed { background-color: #c0392b; }"
             )
-            if self._auto_fallback_count == 0:
-                # 仅用户手动切换时才播报，避免自动降级时重复播报
-                self.add_voice_message("已切换至离线地图", icon="🗺️")
-                if self.voice_player:
-                    self.voice_player.speak("已切换至离线地图", show_in_ui=False)
         else:
             self.btn_map_mode.setText("在线")
             self.btn_map_mode.setStyleSheet(
                 "QPushButton { background-color: #2ecc71; color: #FFFFFF; border-radius: 6px; }"
                 "QPushButton:pressed { background-color: #27ae60; }"
             )
-            self.add_voice_message("已切换至在线地图", icon="🗺️")
-            if self.voice_player:
-                self.voice_player.speak("已切换至在线地图", show_in_ui=False)
 
     def _on_config_saved(self):
         print("[Main] 配置已更新并保存")

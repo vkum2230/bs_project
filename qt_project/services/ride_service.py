@@ -46,19 +46,20 @@ class RideService(QObject):
         self._pause_start_time: float = 0.0     # 进入暂停的时间戳
         self._total_pause_time: float = 0.0     # 累计暂停时长（秒）
         self._last_tick_time: float = 0.0       # 上次 timer tick 时间
-        self._last_sensor_time: float = 0.0     # 上次收到传感器数据的时间
-        self._last_altitude: Optional[float] = None  # 上次海拔，用于计算爬升
-
-        # 当前速度（用于 tick 中持续积分距离）
-        self._current_speed: float = 0.0
+        self._last_sensor_time: float = 0.0     # 上次收到传感器数据的时间（0 表示尚未收到）
+        self._initial_altitude: Optional[float] = None  # 初始海拔基准值
+        self._current_speed: float = 0.0            # 当前速度，用于 tick 中累加距离
+        self._last_lat: Optional[float] = None      # 上次纬度
+        self._last_lon: Optional[float] = None      # 上次经度
+        self._location_moved: bool = False          # 本周期内位置是否发生变化
 
         # 用于计算平均值的数据累加器
+        self._speed_sum: float = 0.0            # 速度总和
+        self._speed_count: int = 0              # 速度数据点数
         self._power_sum: float = 0.0            # 功率总和
         self._power_count: int = 0              # 功率数据点数
         self._hr_sum: float = 0.0               # 心率总和
         self._hr_count: int = 0                 # 心率数据点数
-        self._speed_sum: float = 0.0            # 速度总和
-        self._speed_count: int = 0              # 速度数据点数
 
         # 轨迹点缓存（用于生成 FIT/GPX）
         self._track_points: List[TrackPoint] = []
@@ -84,14 +85,17 @@ class RideService(QObject):
         self._total_pause_time = 0.0
         self._last_tick_time = now
         self._last_sensor_time = now
-        self._last_altitude = None
-        self._current_speed = 0.0
+        self._initial_altitude = None
+        self._speed_sum = 0.0
+        self._speed_count = 0
         self._power_sum = 0.0
         self._power_count = 0
         self._hr_sum = 0.0
         self._hr_count = 0
-        self._speed_sum = 0.0
-        self._speed_count = 0
+        self._current_speed = 0.0
+        self._last_lat = None
+        self._last_lon = None
+        self._location_moved = False
         self._track_points = []
 
         self.summary = RideSummary(
@@ -107,6 +111,7 @@ class RideService(QObject):
             avg_hr=0.0,
             max_hr=0.0,
             total_elevation_gain=0.0,
+            max_elevation_gain=0.0,
             calories=0.0,
             file_path="",
         )
@@ -204,10 +209,20 @@ class RideService(QObject):
             self._last_sensor_time = now
             return
 
+        # 更新当前速度（用于每秒 tick 累加距离）
+        self._current_speed = sensor.speed
         self._last_sensor_time = now
 
-        # 记录当前速度（用于 tick 中持续积分距离）
-        self._current_speed = max(0.0, sensor.speed)
+        # 位置变化检测（有 GPS 且坐标有效时）
+        if sensor.location and sensor.location.lat and sensor.location.lon:
+            if self._last_lat is not None:
+                if (abs(sensor.location.lat - self._last_lat) > 1e-6 or
+                        abs(sensor.location.lon - self._last_lon) > 1e-6):
+                    self._location_moved = True
+            else:
+                self._location_moved = True
+            self._last_lat = sensor.location.lat
+            self._last_lon = sensor.location.lon
 
         # 最大速度 / 功率 / 心率
         if sensor.speed > self.summary.max_speed:
@@ -217,25 +232,28 @@ class RideService(QObject):
         if sensor.heart_rate > self.summary.max_hr:
             self.summary.max_hr = sensor.heart_rate
 
-        # 平均功率 / 心率 / 速度累加
+        # 平均功率 / 心率累加
         self._power_sum += sensor.power
         self._power_count += 1
         self._hr_sum += sensor.heart_rate
         self._hr_count += 1
+
+        # 平均速度 = 速度采样算术平均（只有收到新数据时才变化）
         self._speed_sum += sensor.speed
         self._speed_count += 1
         if self._speed_count > 0:
             self.summary.avg_speed = round(self._speed_sum / self._speed_count, 1)
 
-        # 海拔爬升（基于 GPS 海拔）
-        altitude = 0.0
+        # 海拔爬升（基于初始海拔基准）
         if sensor.location and sensor.location.altitude:
             altitude = sensor.location.altitude
-        if self._last_altitude is not None:
-            gain = altitude - self._last_altitude
-            if gain > 1.0:  # 超过 1 米才算有效爬升，抗抖动
-                self.summary.total_elevation_gain += gain
-        self._last_altitude = altitude
+            if self._initial_altitude is None:
+                self._initial_altitude = altitude
+            gain = altitude - self._initial_altitude
+            if gain > 0:
+                self.summary.total_elevation_gain = round(gain, 1)
+                if gain > self.summary.max_elevation_gain:
+                    self.summary.max_elevation_gain = round(gain, 1)
 
         # 轨迹点采样（有 GPS 且坐标有效时记录）
         if sensor.location and sensor.location.lat and sensor.location.lon:
@@ -272,15 +290,17 @@ class RideService(QObject):
         # 移动时间：只要状态是 RIDING 就累加
         self.summary.moving_time += delta
 
-        # 骑行距离：基于当前速度每秒自动增加
-        self.summary.total_distance += self._current_speed * delta / 3600.0
+        # 骑行距离：当前速度 × 时间间隔（仅当位置发生变化时才累加）
+        if self._location_moved:
+            self.summary.total_distance += self._current_speed * delta / 3600.0
+            self._location_moved = False
 
         # 实时平均功率 / 心率
         if self._power_count > 0:
             self.summary.avg_power = round(self._power_sum / self._power_count, 0)
         if self._hr_count > 0:
             self.summary.avg_hr = round(self._hr_sum / self._hr_count, 0)
-        # 平均速度在 on_sensor_data 里基于采样算术平均计算，没新数据保持不变
+        # 平均速度在 on_sensor_data 中基于采样算术平均计算，无新数据时保持不变
 
         # 卡路里（简单公式：kcal = weight(kg) * distance(km) * 1.036）
         weight = self.config.get("weight_kg", 70)

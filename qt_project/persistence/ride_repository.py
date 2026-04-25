@@ -201,6 +201,7 @@ class RideRepository:
             "avg_hr": summary.avg_hr,
             "max_hr": summary.max_hr,
             "total_elevation_gain": round(summary.total_elevation_gain, 1),
+            "max_elevation_gain": round(summary.max_elevation_gain, 1),
             "calories": summary.calories,
             "gpx_path": gpx_path,
             "fit_path": fit_path,

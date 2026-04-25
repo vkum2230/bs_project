@@ -42,6 +42,7 @@ class BleServer(QThread):
         self._running = False
         self._send_queue = queue.Queue()
         self._lock = threading.Lock()
+        self.connected_at: float = 0.0  # 本次连接建立的时间戳
 
     @staticmethod
     def _setup_bluetooth(port: int = 1):
@@ -121,10 +122,11 @@ class BleServer(QThread):
                     self.client_sock = client_sock
                     self.client_addr = client_info[0]
 
+                self.connected_at = time.time()
                 print(f"[BleServer] App 已连接: {self.client_addr}")
                 self.client_connected.emit(self.client_addr)
 
-                # 发送欢迎消息
+                # 发送欢迎消息（JSON 格式）
                 self._send_raw(b"{\"event\":\"connected\",\"msg\":\"SMART RIDE ready\"}\r\n")
 
                 # 进入与该客户端的通信循环
@@ -174,7 +176,8 @@ class BleServer(QThread):
                 payload = self._send_queue.get_nowait()
                 if isinstance(payload, str):
                     payload = payload.encode("utf-8")
-                if not payload.endswith(b"\r\n"):
+                # JSON 数据追加换行分隔符，二进制紧凑数据直接发送
+                if payload.startswith(b"{") and not payload.endswith(b"\r\n"):
                     payload += b"\r\n"
                 sock.sendall(payload)
             except queue.Empty:

@@ -2865,8 +2865,10 @@ class MapWidget(QWidget):
 
             document.getElementById('navPanel').style.display = 'none';
 
-            // 重置地图旋转
-            map.setRotation(0);
+            // 重置地图旋转（仅高德地图支持）
+            if (typeof map.setRotation === 'function') {{
+                map.setRotation(0);
+            }}
 
             // 重置导航状态
             window.navRouteIndex = 0;
@@ -2881,15 +2883,26 @@ class MapWidget(QWidget):
                 window.navStraightLine = null;
             }}
 
-            // 恢复普通位置标记
+            // 恢复普通位置标记（Leaflet 离线模式使用 L.marker，高德使用 AMap.Marker）
             if (currentPos && !currentMarker) {{
-                currentMarker = new AMap.Marker({{
-                    position: currentPos,
-                    map: map,
-                    title: '当前位置',
-                    offset: new AMap.Pixel(-8, -8),
-                    content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
-                }});
+                if (typeof AMap !== 'undefined') {{
+                    currentMarker = new AMap.Marker({{
+                        position: currentPos,
+                        map: map,
+                        title: '当前位置',
+                        offset: new AMap.Pixel(-8, -8),
+                        content: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>'
+                    }});
+                }} else if (typeof L !== 'undefined') {{
+                    currentMarker = L.marker([currentPos[1], currentPos[0]], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style="width:16px;height:16px;background:#4DB8FF;border:2px solid #FFFFFF;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,0.6);"></div>',
+                            iconSize: [16, 16],
+                            iconAnchor: [8, 8]
+                        }})
+                    }}).addTo(map);
+                }}
             }}
             // 恢复航向标记（如果有缓存的航向）
             if (currentPos && pendingYaw !== null && !yawMarker) {{
@@ -4476,7 +4489,13 @@ class MapWidget(QWidget):
 
                     var bounds = L.latLngBounds(historyPath);
                     setTimeout(function() {{
-                        map.fitBounds(bounds, {{padding: [30, 30]}});
+                        var targetZoom = map.getBoundsZoom(bounds, {{padding: [30, 30]}});
+                        if (targetZoom < 13) targetZoom = 13;
+                        if (targetZoom > 16) targetZoom = 16;
+                        map.fitBounds(bounds, {{padding: [30, 30], maxZoom: 16}});
+                        if (map.getZoom() < 13) {{
+                            map.setZoom(13);
+                        }}
                     }}, 200);
                 }}
             """

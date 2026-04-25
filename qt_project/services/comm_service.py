@@ -254,6 +254,11 @@ class CommService(QObject):
         self.data_buffer = DataBuffer(window_seconds=1.0)
         self.buffer_queue = BufferQueue(max_items=5000, max_age_seconds=1800)
 
+        # 各通道最后成功推送时间戳（用于断连补发）
+        self.ble_last_push_time = 0.0
+        self.wifi_last_push_time = 0.0
+        self.mqtt_last_push_time = 0.0
+
         # BLE / WiFi 服务器
         self.ble_server = BleServer(host_address="2C:CF:67:F2:ED:B2", port=1)
         self.wifi_server = WifiServer(host="0.0.0.0", port=8765)
@@ -264,7 +269,7 @@ class CommService(QObject):
             port=1883,
             client_id=None,  # 不固定 client_id，避免公共 broker 冲突
             on_command=self._on_mqtt_command,
-            on_connected=lambda: self.mqtt_connected.emit(),
+            on_connected=lambda: (self.mqtt_connected.emit(), self._flush_buffer_for_channel("mqtt")),
             on_disconnected=lambda: self.mqtt_disconnected.emit(),
         )
 
@@ -331,36 +336,46 @@ class CommService(QObject):
     # --------------------------------------------------------------------------
 
     def _push_realtime_data(self):
-        """每秒执行一次：合并数据并推送到可用通道"""
+        """每秒执行一次：合并数据并并行推送到所有可用通道"""
         app_data = self.data_buffer.get_merged(self.ride_state)
         self.data_pushed.emit(app_data)
+        now = time.time()
 
-        has_ble = self.ble_server.has_connected_client()
-        has_wifi = self.wifi_server.has_connected_client()
+        # 无论通道是否连接，数据都进入 BufferQueue（用于断连补发）
+        self.buffer_queue.push(app_data)
 
-        if has_ble:
-            # 蓝牙优先：发送 JSON
+        # 并行推送到所有可用通道
+        pushed_count = 0
+
+        # BLE：走紧凑二进制
+        if self.ble_server.has_connected_client():
             try:
-                ble_payload = app_data.to_json()
-                self.ble_server.notify(ble_payload)
+                self.ble_server.notify(app_data.to_ble_bytes())
+                self.ble_last_push_time = now
+                pushed_count += 1
             except Exception as e:
                 print(f"[CommService] BLE推送失败: {e}")
-            # 蓝牙恢复后补发缓存
-            self._try_flush_buffer()
-        else:
-            # 蓝牙断开，走网络通道（MQTT + 可选 WiFi）
-            self.mqtt_bridge.publish("realtime", app_data.to_dict())
-            if has_wifi:
-                try:
-                    json_payload = app_data.to_json()
-                    self.wifi_server.broadcast(json_payload)
-                except Exception as e:
-                    print(f"[CommService] WiFi推送失败: {e}")
-            # 只要 MQTT 连着或有 WiFi 客户端，就尝试补发；否则缓存
-            if self.mqtt_bridge._connected or has_wifi:
-                self._try_flush_buffer()
-            else:
-                self.buffer_queue.push(app_data)
+
+        # WiFi：走完整 JSON（主力通道）
+        if self.wifi_server.has_connected_client():
+            try:
+                self.wifi_server.broadcast(app_data.to_json())
+                self.wifi_last_push_time = now
+                pushed_count += 1
+            except Exception as e:
+                print(f"[CommService] WiFi推送失败: {e}")
+
+        # MQTT
+        if self.mqtt_bridge._connected:
+            try:
+                self.mqtt_bridge.publish("realtime", app_data.to_dict())
+                self.mqtt_last_push_time = now
+                pushed_count += 1
+            except Exception as e:
+                print(f"[CommService] MQTT推送失败: {e}")
+
+        if pushed_count == 0:
+            print("[CommService] 所有通道断开，数据已缓存")
 
     def _check_and_emit_events(self, sensor: SensorData):
         """基于传感器数据检查是否需要立即推送事件"""
@@ -407,44 +422,73 @@ class CommService(QObject):
         self._push_event("alert", payload)
 
     def _push_event(self, event_type: str, payload: dict):
-        """立即推送事件到可用通道（蓝牙优先）"""
+        """立即推送事件到所有可用通道"""
         self.event_pushed.emit(event_type, payload)
         event_json = json.dumps({"event": event_type, "data": payload}, ensure_ascii=False)
 
-        has_ble = self.ble_server.has_connected_client()
-        has_wifi = self.wifi_server.has_connected_client()
+        if self.ble_server.has_connected_client():
+            try:
+                self.ble_server.notify(event_json)
+            except Exception as e:
+                print(f"[CommService] BLE事件推送失败: {e}")
 
-        if has_ble:
-            self.ble_server.notify(event_json)
-        else:
-            # 蓝牙断开，走网络通道（MQTT + 可选 WiFi）
-            self.mqtt_bridge.publish("event", {"event": event_type, "data": payload})
-            if has_wifi:
+        if self.wifi_server.has_connected_client():
+            try:
                 self.wifi_server.broadcast(event_json)
+            except Exception as e:
+                print(f"[CommService] WiFi事件推送失败: {e}")
 
-    def _try_flush_buffer(self):
-        """尝试将断连缓存的数据补发给 WiFi / MQTT 客户端"""
+        if self.mqtt_bridge._connected:
+            try:
+                self.mqtt_bridge.publish("event", {"event": event_type, "data": payload})
+            except Exception as e:
+                print(f"[CommService] MQTT事件推送失败: {e}")
+
+    def _flush_buffer_for_channel(self, channel: str):
+        """为指定通道补发断连期间的数据"""
         if self.buffer_queue.is_empty():
             return
 
-        summary = self.buffer_queue.get_summary()
-        print(f"[CommService] 补发缓存数据: {summary['count']} 条, "
-              f"持续时间 {summary['duration']} 秒")
+        time_map = {
+            "ble": self.ble_last_push_time,
+            "wifi": self.wifi_last_push_time,
+            "mqtt": self.mqtt_last_push_time,
+        }
+        cutoff = time_map.get(channel, 0)
+        if cutoff <= 0:
+            return
 
-        items = self.buffer_queue.drain()
+        items = self.buffer_queue.get_since(cutoff)
+        if not items:
+            return
+
+        print(f"[CommService] [{channel}] 补发缓存数据: {len(items)} 条")
         # 分批次发送，避免一次性发送太多导致阻塞
         BATCH_SIZE = 50
         for i in range(0, len(items), BATCH_SIZE):
             batch = items[i:i + BATCH_SIZE]
             batch_payload = {"event": "buffer_sync", "data": batch}
             batch_json = json.dumps(batch_payload, ensure_ascii=False)
-            # 缓冲补发：蓝牙优先，否则 MQTT/WiFi
-            if self.ble_server.has_connected_client():
-                self.ble_server.notify(batch_json)
-            else:
-                self.mqtt_bridge.publish("buffer", batch_payload)
-                if self.wifi_server.has_connected_client():
+            try:
+                if channel == "ble" and self.ble_server.has_connected_client():
+                    self.ble_server.notify(batch_json)
+                elif channel == "wifi" and self.wifi_server.has_connected_client():
                     self.wifi_server.broadcast(batch_json)
+                elif channel == "mqtt" and self.mqtt_bridge._connected:
+                    self.mqtt_bridge.publish("buffer", batch_payload)
+            except Exception as e:
+                print(f"[CommService] [{channel}] 补发失败: {e}")
+                return
+
+        # 更新该通道的最后推送时间
+        if items:
+            latest_ts = items[-1].get("timestamp", time.time())
+            if channel == "ble":
+                self.ble_last_push_time = latest_ts
+            elif channel == "wifi":
+                self.wifi_last_push_time = latest_ts
+            elif channel == "mqtt":
+                self.mqtt_last_push_time = latest_ts
 
     # --------------------------------------------------------------------------
     # 命令接收与转发
@@ -538,6 +582,7 @@ class CommService(QObject):
     def _on_ble_connected(self, addr: str):
         print(f"[CommService] BLE 客户端已连接: {addr}")
         self.ble_client_connected.emit(addr)
+        self._flush_buffer_for_channel("ble")
 
     def _on_ble_disconnected(self):
         print("[CommService] BLE 客户端已断开")
@@ -546,6 +591,7 @@ class CommService(QObject):
     def _on_wifi_connected(self, addr: str):
         print(f"[CommService] WiFi 客户端已连接: {addr}")
         self.wifi_client_connected.emit(addr)
+        self._flush_buffer_for_channel("wifi")
 
     def _on_wifi_disconnected(self, addr: str):
         print(f"[CommService] WiFi 客户端已断开: {addr}")

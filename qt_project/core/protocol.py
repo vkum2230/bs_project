@@ -163,7 +163,8 @@ class RideSummary:
     max_power: float = 0.0           # W
     avg_hr: float = 0.0              # bpm
     max_hr: float = 0.0              # bpm
-    total_elevation_gain: float = 0.0 # m
+    total_elevation_gain: float = 0.0 # m（相对于初始海拔的当前爬升）
+    max_elevation_gain: float = 0.0   # m（相对于初始海拔的最大爬升）
     calories: float = 0.0            # kcal
     file_path: str = ""              # 本地 FIT/GPX 文件路径
 

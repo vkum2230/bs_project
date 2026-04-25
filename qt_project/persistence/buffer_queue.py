@@ -73,6 +73,10 @@ class BufferQueue:
     def size(self) -> int:
         return len(self._buffer)
 
+    def get_since(self, timestamp: float) -> List[Dict[str, Any]]:
+        """获取指定时间戳之后的数据（用于断连补发）"""
+        return [item for item in self._buffer if item.get("timestamp", 0) > timestamp]
+
     def get_summary(self) -> Dict[str, Any]:
         """获取缓存摘要"""
         if not self._buffer:

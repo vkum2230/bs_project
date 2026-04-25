@@ -243,6 +243,8 @@ class HistoryPage(QWidget):
         _add_detail(2, 2, "total_elevation_gain", "累计爬升")
         _add_detail(2, 3, "calories", "消耗热量")
 
+        _add_detail(3, 0, "max_elevation_gain", "最大爬升高度")
+
         detail_layout.addLayout(stats_grid)
 
         # 操作按钮
@@ -360,6 +362,7 @@ class HistoryPage(QWidget):
         self._detail_labels["avg_hr"].setText(f"{meta.get('avg_hr', 0.0):.0f} bpm")
         self._detail_labels["max_hr"].setText(f"{meta.get('max_hr', 0.0):.0f} bpm")
         self._detail_labels["total_elevation_gain"].setText(f"{meta.get('total_elevation_gain', 0.0):.1f} m")
+        self._detail_labels["max_elevation_gain"].setText(f"{meta.get('max_elevation_gain', 0.0):.1f} m")
         self._detail_labels["calories"].setText(f"{meta.get('calories', 0.0):.0f} kcal")
 
     def _on_view_map_clicked(self):
@@ -370,13 +373,22 @@ class HistoryPage(QWidget):
         if not self._current_ride_id or not self.ride_repo:
             return
 
-        reply = QMessageBox.question(
-            self,
-            "删除记录",
-            f"确定要删除骑行记录 {self._current_ride_id} 吗？\n此操作不可恢复。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("删除记录")
+        msg_box.setText(f"确定要删除骑行记录 {self._current_ride_id} 吗？")
+        msg_box.setInformativeText("此操作不可恢复。")
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.No)
+        msg_box.setStyleSheet("""
+            QMessageBox { background-color: #2A2A2A; }
+            QMessageBox QLabel { color: #FFFFFF; }
+        """)
+        btn_style = "color: #FFFFFF; background-color: #555555; border: 1px solid #777777; padding: 5px 15px; border-radius: 4px;"
+        for btn in (msg_box.button(QMessageBox.Yes), msg_box.button(QMessageBox.No)):
+            if btn:
+                btn.setStyleSheet(btn_style)
+        reply = msg_box.exec_()
         if reply == QMessageBox.Yes:
             success = self.ride_repo.delete_ride(self._current_ride_id)
             if success:
@@ -384,7 +396,19 @@ class HistoryPage(QWidget):
                 self._current_track_points = []
                 self.refresh_list()
             else:
-                QMessageBox.warning(self, "删除失败", "无法删除该记录，请检查文件权限。")
+                warn_box = QMessageBox(self)
+                warn_box.setWindowTitle("删除失败")
+                warn_box.setText("无法删除该记录，请检查文件权限。")
+                warn_box.setIcon(QMessageBox.Warning)
+                warn_box.setStandardButtons(QMessageBox.Ok)
+                warn_box.setStyleSheet("""
+                    QMessageBox { background-color: #2A2A2A; }
+                    QMessageBox QLabel { color: #FFFFFF; }
+                """)
+                ok_btn = warn_box.button(QMessageBox.Ok)
+                if ok_btn:
+                    ok_btn.setStyleSheet(btn_style)
+                warn_box.exec_()
 
 
 if __name__ == "__main__":

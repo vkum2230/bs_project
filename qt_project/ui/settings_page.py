@@ -5,7 +5,7 @@
 
 职责：
 - 展示和修改用户配置项
-- 心率上限、心率下限、体重、年龄、告警开关
+- 心率上限、心率下限、体重、后方来车阈值、告警开关
 """
 
 from typing import Optional
@@ -87,17 +87,6 @@ class SettingsPage(QWidget):
         card_layout.addWidget(lbl_weight, 2, 0)
         card_layout.addWidget(self.spin_weight, 2, 1)
 
-        # 年龄
-        lbl_age = QLabel("年龄")
-        lbl_age.setStyleSheet("color: #AAAAAA; background: transparent;")
-        lbl_age.setFont(QFont("Helvetica", 11))
-        self.spin_age = QSpinBox()
-        self.spin_age.setRange(5, 120)
-        self.spin_age.setValue(self.config.get("age", 30))
-        self.spin_age.setStyleSheet(self._spin_style())
-        card_layout.addWidget(lbl_age, 3, 0)
-        card_layout.addWidget(self.spin_age, 3, 1)
-
         # 后方来车距离阈值
         lbl_rear = QLabel("后方来车阈值 (m)")
         lbl_rear.setStyleSheet("color: #AAAAAA; background: transparent;")
@@ -107,8 +96,8 @@ class SettingsPage(QWidget):
         self.spin_rear.setDecimals(1)
         self.spin_rear.setValue(self.config.get("rear_dist_alert_m", 5.0))
         self.spin_rear.setStyleSheet(self._spin_style())
-        card_layout.addWidget(lbl_rear, 4, 0)
-        card_layout.addWidget(self.spin_rear, 4, 1)
+        card_layout.addWidget(lbl_rear, 3, 0)
+        card_layout.addWidget(self.spin_rear, 3, 1)
 
         layout.addWidget(card)
 
@@ -235,7 +224,6 @@ class SettingsPage(QWidget):
         self.config.set("heart_rate_max", self.spin_hr_max.value())
         self.config.set("heart_rate_min", self.spin_hr_min.value())
         self.config.set("weight_kg", round(self.spin_weight.value(), 1))
-        self.config.set("age", self.spin_age.value())
         self.config.set("rear_dist_alert_m", round(self.spin_rear.value(), 1))
 
         alerts = {
@@ -259,7 +247,6 @@ class SettingsPage(QWidget):
             self.spin_hr_max.setValue(180)
             self.spin_hr_min.setValue(50)
             self.spin_weight.setValue(70.0)
-            self.spin_age.setValue(30)
             self.spin_rear.setValue(5.0)
             self.chk_rear.setChecked(True)
             self.chk_hr.setChecked(True)
