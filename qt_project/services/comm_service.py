@@ -319,7 +319,6 @@ class CommService(QObject):
         self.data_buffer.push(sensor)
 
         # 注：实时告警检测已迁移到 AlertService，避免重复鬼畜
-        # CommService 仍保留 _check_and_emit_events 作为旧接口兼容，但不在此自动调用
 
     def set_ride_state(self, state: RideSessionState):
         """更新当前骑行状态"""
@@ -376,35 +375,6 @@ class CommService(QObject):
 
         if pushed_count == 0:
             print("[CommService] 所有通道断开，数据已缓存")
-
-    def _check_and_emit_events(self, sensor: SensorData):
-        """基于传感器数据检查是否需要立即推送事件"""
-        # 后方来车告警
-        if sensor.rear_dist > 0 and sensor.rear_dist < 5:
-            payload = build_alert_payload(
-                type(self)._get_alert_type("rear_vehicle"),
-                f"后方有车辆接近，距离仅{sensor.rear_dist:.1f}米",
-                level="critical" if sensor.rear_dist < 3 else "warning",
-            )
-            self._push_event("alert", payload)
-
-        # 心率过高告警（默认阈值 180，后续从配置读取）
-        if sensor.heart_rate > 180:
-            payload = build_alert_payload(
-                type(self)._get_alert_type("heart_rate_high"),
-                f"心率过高：{sensor.heart_rate:.0f}次每分钟，请注意",
-                level="warning",
-            )
-            self._push_event("alert", payload)
-
-        # 姿态异常告警
-        if sensor.posture != 0:
-            payload = build_alert_payload(
-                type(self)._get_alert_type("fall_detected"),
-                "检测到骑行姿态异常，请注意安全",
-                level="warning",
-            )
-            self._push_event("alert", payload)
 
     @staticmethod
     def _get_alert_type(name: str):

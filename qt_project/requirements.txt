@@ -1,0 +1,39 @@
+# SMART RIDE 智能骑行码表 — Python 依赖
+# 安装命令: pip3 install -r requirements.txt
+# 注意: PyQt5 在树莓派上建议通过 apt 安装:
+#   sudo apt update
+#   sudo apt install python3-pyqt5 python3-pyqt5.qtwebengine
+
+# ==================== 核心依赖（必须） ====================
+PyQt5>=5.15.0
+pyserial>=3.5
+requests>=2.28.0
+
+# ==================== 通信层 ====================
+paho-mqtt>=1.6.0
+websockets>=11.0
+
+# ==================== 数据持久化 ====================
+gpxpy>=1.6.0
+garmin-fit-sdk>=21.0
+fitdecode>=0.10.0
+
+# ==================== 语音 TTS（分层降级） ====================
+# 在线 TTS
+dashscope>=1.17.0        # 阿里云百炼 / CosyVoice
+edge-tts>=6.1.0          # Edge-TTS 在线语音
+
+# 离线 TTS（可选，至少安装一种）
+# piper-tts>=1.2.0       # Piper 本地神经网络 TTS（推荐）
+# pyttsx3>=2.90          # 系统 TTS 保底
+# pygame>=2.5.0          # pygame 音频播放备用
+# PyAudio>=0.2.13        # PyAudio 音频播放备用
+
+# ==================== 语音 ASR（可选） ====================
+# vosk>=0.3.45           # 离线语音识别（按钮语音助手需要）
+
+# ==================== 硬件驱动（可选） ====================
+# spidev>=3.6            # ReSpeaker LED 控制器（树莓派 SPI）
+
+# ==================== 大模型（可选） ====================
+# ollama 通过系统命令安装: curl -fsSL https://ollama.com/install.sh | sh
