@@ -99,6 +99,33 @@ class SettingsPage(QWidget):
         card_layout.addWidget(lbl_rear, 3, 0)
         card_layout.addWidget(self.spin_rear, 3, 1)
 
+        # 播报音量（移到系统设置卡片内）
+        lbl_volume = QLabel("播报音量")
+        lbl_volume.setStyleSheet("color: #AAAAAA; background: transparent;")
+        lbl_volume.setFont(QFont("Helvetica", 11))
+
+        vol_widget = QWidget()
+        vol_widget.setStyleSheet("background: transparent;")
+        vol_layout = QHBoxLayout(vol_widget)
+        vol_layout.setContentsMargins(0, 0, 0, 0)
+        vol_layout.setSpacing(8)
+
+        self.slider_volume = QSlider(Qt.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(self.config.get("voice_volume", 85))
+        self.slider_volume.setStyleSheet(self._slider_style())
+        self.slider_volume.valueChanged.connect(self._on_volume_changed)
+        vol_layout.addWidget(self.slider_volume, 1)
+
+        self.lbl_volume_val = QLabel(f"{self.slider_volume.value()}%")
+        self.lbl_volume_val.setStyleSheet("color: #FFFFFF; background: transparent;")
+        self.lbl_volume_val.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self.lbl_volume_val.setFixedWidth(45)
+        vol_layout.addWidget(self.lbl_volume_val)
+
+        card_layout.addWidget(lbl_volume, 4, 0)
+        card_layout.addWidget(vol_widget, 4, 1)
+
         layout.addWidget(card)
 
         # 告警开关卡片
@@ -152,43 +179,6 @@ class SettingsPage(QWidget):
         alert_layout.addLayout(checkbox_grid)
 
         layout.addWidget(alert_card)
-
-        # 语音设置卡片
-        voice_card = QFrame()
-        voice_card.setStyleSheet("""
-            QFrame {
-                background-color: #2A2A2A;
-                border-radius: 12px;
-                border: 1px solid #3A3A4A;
-            }
-        """)
-        voice_layout = QVBoxLayout(voice_card)
-        voice_layout.setSpacing(10)
-        voice_layout.setContentsMargins(12, 10, 12, 10)
-
-        voice_title = QLabel("🔊 语音播报")
-        voice_title.setStyleSheet("color: #FFFFFF; background: transparent;")
-        voice_title.setFont(QFont("Helvetica", 13, QFont.Bold))
-        voice_layout.addWidget(voice_title)
-
-        slider_layout = QHBoxLayout()
-        slider_layout.setSpacing(12)
-
-        self.slider_volume = QSlider(Qt.Horizontal)
-        self.slider_volume.setRange(0, 100)
-        self.slider_volume.setValue(self.config.get("voice_volume", 85))
-        self.slider_volume.setStyleSheet(self._slider_style())
-        self.slider_volume.valueChanged.connect(self._on_volume_changed)
-        slider_layout.addWidget(self.slider_volume, 1)
-
-        self.lbl_volume_val = QLabel(f"{self.slider_volume.value()}%")
-        self.lbl_volume_val.setStyleSheet("color: #FFFFFF; background: transparent;")
-        self.lbl_volume_val.setFont(QFont("Helvetica", 12, QFont.Bold))
-        self.lbl_volume_val.setFixedWidth(45)
-        slider_layout.addWidget(self.lbl_volume_val)
-
-        voice_layout.addLayout(slider_layout)
-        layout.addWidget(voice_card)
 
         # 底部按钮
         btn_layout = QHBoxLayout()

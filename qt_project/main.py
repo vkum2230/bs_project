@@ -752,10 +752,10 @@ class BikeComputerPro(QWidget):
         self.stacked_widget.addWidget(self.page_history)
         self.stacked_widget.addWidget(scroll_settings)
 
-        # --- 消息框（双重保护：min+max 确保 layout 绝不压缩） ---
+        # --- 消息框（固定 3 行消息高度，不被任何页面内容挤压） ---
         self.dialog_container = QWidget()
-        self.dialog_container.setMinimumHeight(145)
-        self.dialog_container.setMaximumHeight(145)
+        self.dialog_container.setMinimumHeight(96)
+        self.dialog_container.setMaximumHeight(96)
         self.dialog_container.setStyleSheet("background: transparent;")
 
         dialog_layout = QVBoxLayout(self.dialog_container)
@@ -763,8 +763,8 @@ class BikeComputerPro(QWidget):
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
-        self.dialog_box.setMinimumHeight(120)
-        self.dialog_box.setMaximumHeight(120)
+        self.dialog_box.setMinimumHeight(78)
+        self.dialog_box.setMaximumHeight(78)
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -773,7 +773,7 @@ class BikeComputerPro(QWidget):
             }
         """)
         box_layout = QVBoxLayout(self.dialog_box)
-        box_layout.setContentsMargins(10, 6, 10, 6)
+        box_layout.setContentsMargins(10, 4, 10, 4)
         box_layout.setSpacing(2)
 
         self.dialog_msg = QLabel("🤖 欢迎使用 SMART RIDE 智能助理...")
