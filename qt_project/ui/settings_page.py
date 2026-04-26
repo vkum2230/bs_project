@@ -113,8 +113,11 @@ class SettingsPage(QWidget):
         self.slider_volume = QSlider(Qt.Horizontal)
         self.slider_volume.setRange(0, 100)
         self.slider_volume.setValue(self.config.get("voice_volume", 85))
+        self.slider_volume.setSingleStep(5)
+        self.slider_volume.setPageStep(10)
         self.slider_volume.setStyleSheet(self._slider_style())
         self.slider_volume.valueChanged.connect(self._on_volume_changed)
+        self.slider_volume.sliderReleased.connect(self._on_volume_released)
         vol_layout.addWidget(self.slider_volume, 1)
 
         self.lbl_volume_val = QLabel(f"{self.slider_volume.value()}%")
@@ -250,45 +253,72 @@ class SettingsPage(QWidget):
     def _slider_style(self) -> str:
         return """
             QSlider::groove:horizontal {
-                height: 6px;
+                height: 8px;
                 background: #555555;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QSlider::sub-page:horizontal {
                 background: #2ecc71;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                width: 16px;
-                height: 16px;
-                margin: -5px 0;
+                width: 28px;
+                height: 28px;
+                margin: -10px 0;
                 background: #FFFFFF;
-                border-radius: 8px;
+                border-radius: 14px;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #DDDDDD;
             }
         """
 
     def _on_volume_changed(self, value: int):
         self.lbl_volume_val.setText(f"{value}%")
 
+    def _on_volume_released(self):
+        """滑动结束时实时应用音量"""
+        vol = self.slider_volume.value()
+        print(f"[Settings] 滑块释放，应用音量 {vol}%")
+        self._set_system_volume(vol)
+
     @staticmethod
-    def _set_system_volume(volume: int):
-        """通过 amixer 设置系统音量（覆盖在线/离线所有语音）"""
+    def _set_system_volume(volume: int) -> bool:
+        """通过 amixer 设置系统音量（覆盖在线/离线所有语音）
+        返回是否至少有一个控制项设置成功
+        """
         import subprocess
         vol = max(0, min(100, volume))
-        # 优先设置 ReSpeaker 声卡（card 2），同时尝试默认声卡
-        cmds = [
-            ["amixer", "-c", "2", "set", "PCM", f"{vol}%", "unmute"],
-            ["amixer", "-c", "2", "set", "Headphone", f"{vol}%", "unmute"],
-            ["amixer", "-c", "2", "set", "Speaker", f"{vol}%", "unmute"],
-            ["amixer", "set", "Master", f"{vol}%", "unmute"],
-            ["amixer", "set", "PCM", f"{vol}%", "unmute"],
+        success = False
+
+        # 先检测可用的声卡和控制项
+        candidates = [
+            ("amixer", "-c", "2", "set", "PCM", f"{vol}%", "unmute"),
+            ("amixer", "-c", "2", "set", "Headphone", f"{vol}%", "unmute"),
+            ("amixer", "-c", "2", "set", "Speaker", f"{vol}%", "unmute"),
+            ("amixer", "-c", "2", "set", "Digital", f"{vol}%", "unmute"),
+            ("amixer", "set", "Master", f"{vol}%", "unmute"),
+            ("amixer", "set", "PCM", f"{vol}%", "unmute"),
+            ("amixer", "set", "Headphone", f"{vol}%", "unmute"),
         ]
-        for cmd in cmds:
+
+        for cmd in candidates:
             try:
-                subprocess.run(cmd, capture_output=True, timeout=3)
-            except Exception:
-                pass
-        print(f"[Settings] 系统音量已设置为 {vol}%")
+                result = subprocess.run(cmd, capture_output=True, timeout=3)
+                if result.returncode == 0:
+                    print(f"[Volume] ✓ {' '.join(cmd)}")
+                    success = True
+                else:
+                    err = result.stderr.decode().strip()[:60] if result.stderr else ""
+                    print(f"[Volume] ✗ {' '.join(cmd)} — {err}")
+            except Exception as e:
+                print(f"[Volume] ✗ {' '.join(cmd)} — {e}")
+
+        if success:
+            print(f"[Volume] 系统音量已设置为 {vol}%")
+        else:
+            print(f"[Volume] 警告：所有 amixer 命令均失败，音量可能未生效")
+        return success
 
     def _save_settings(self):
         self.config.set("heart_rate_max", self.spin_hr_max.value())
