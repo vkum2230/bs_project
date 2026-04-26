@@ -8,7 +8,7 @@ import json
 import math
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QHBoxLayout, QFrame, QPushButton, QStackedWidget,
-                             QGridLayout, QSizePolicy, QWidget, QScrollArea)
+                             QGridLayout, QSizePolicy, QWidget, QScrollArea, QTextEdit)
 from PyQt5.QtCore import QTimer, QDateTime, Qt
 from PyQt5.QtGui import QFont, QCursor
 
@@ -776,13 +776,32 @@ class BikeComputerPro(QWidget):
         box_layout.setContentsMargins(10, 4, 10, 4)
         box_layout.setSpacing(2)
 
-        self.dialog_msg = QLabel("🤖 欢迎使用 SMART RIDE 智能助理...")
+        self.dialog_msg = QTextEdit("🤖 欢迎使用 SMART RIDE 智能助理...")
         self.dialog_msg.setFont(QFont("Helvetica", 12))
-        self.dialog_msg.setStyleSheet("color: #CCCCCC; background: transparent;")
-        self.dialog_msg.setWordWrap(True)
-        self.dialog_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self.dialog_msg.setTextFormat(Qt.PlainText)
-        self.dialog_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.dialog_msg.setReadOnly(True)
+        self.dialog_msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.dialog_msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.dialog_msg.setStyleSheet("""
+            QTextEdit {
+                color: #CCCCCC;
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+            }
+            QScrollBar:vertical {
+                width: 5px;
+                background: transparent;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: #666666;
+                border-radius: 2px;
+                min-height: 16px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
         box_layout.addWidget(self.dialog_msg)
 
         # 语音消息历史（固定显示最近 3 条）
@@ -1438,10 +1457,15 @@ class BikeComputerPro(QWidget):
         QTimer.singleShot(300, lambda: self.page_map.load_history_track(track_points))
         self.add_voice_message(f"已加载历史轨迹，共 {len(track_points)} 个轨迹点", icon="🗺️")
 
+    def _scroll_dialog_to_bottom(self):
+        """滚动消息框到最底部，确保最新消息可见"""
+        scrollbar = self.dialog_msg.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def add_voice_message(self, text: str, icon: str = "🔊"):
         """
-        添加语音消息到消息框
-        
+        添加语音消息到消息框（QTextEdit，带滚动条，自动滚动到底部）
+
         Args:
             text: 消息内容
             icon: 消息图标，特殊值：
@@ -1453,59 +1477,44 @@ class BikeComputerPro(QWidget):
         cleaned_text = text.replace('\n', ' ').replace('\r', ' ').strip()
         if len(cleaned_text) > max_length:
             cleaned_text = cleaned_text[:max_length] + "..."
-        
+
+        def _update_display():
+            display_text = "\n".join(self.voice_messages)
+            self.dialog_msg.setPlainText(display_text)
+            self._scroll_dialog_to_bottom()
+
         # 处理流式更新标记：同一行覆盖更新
         if icon == "__STREAM_UPDATE__":
-            # 检查最后一条是否是流式消息（以 > 🤖 开头）
             if self.voice_messages and "> 🤖 " in self.voice_messages[-1]:
-                # 替换最后一条，保持格式一致
                 self.voice_messages[-1] = f"> 🤖 {cleaned_text}"
             else:
-                # 还没有流式消息，添加一条（不带>前缀，由后续更新添加）
                 self.voice_messages.append(f"> 🤖 {cleaned_text}")
-            
-            # 更新显示
-            display_text = "\n".join(self.voice_messages)
-            self.dialog_msg.setText(display_text)
+            _update_display()
             return
-        
+
         # 处理流式完成标记：在同一行显示最终结果
         if icon == "__STREAM_FINAL__":
-            # 查找并替换最后一条流式消息
             if self.voice_messages and "> 🤖 " in self.voice_messages[-1]:
                 self.voice_messages[-1] = f"> 🤖 {cleaned_text}"
             else:
-                # 没有流式消息，添加最终结果
                 self.voice_messages.append(f"> 🤖 {cleaned_text}")
-            
-            # 限制历史长度
             if len(self.voice_messages) > self.max_voice_messages:
                 self.voice_messages.pop(0)
-            
-            # 更新显示
-            display_text = "\n".join(self.voice_messages)
-            self.dialog_msg.setText(display_text)
+            _update_display()
             print(f"[VoiceMessage] > 🤖 {cleaned_text}")
             return
-        
+
         # 普通消息处理
         message = f"> {icon} {cleaned_text}"
-        
-        # 添加到历史
         self.voice_messages.append(message)
-        
-        # 限制历史长度
         if len(self.voice_messages) > self.max_voice_messages:
             self.voice_messages.pop(0)
-        
-        # 更新显示
-        display_text = "\n".join(self.voice_messages)
-        self.dialog_msg.setText(display_text)
-        
+        _update_display()
+
         # 打印调用栈来追踪来源
         import traceback
         stack = traceback.extract_stack()
-        caller = stack[-2]  # 获取调用者信息
+        caller = stack[-2]
         print(f"[VoiceMessage] {message} [来自: {caller.filename}:{caller.lineno} {caller.name}]")
 
     def _play_welcome_voice(self):
