@@ -58,8 +58,11 @@ class RideData:
         if all_fields or self.slope != 0:
             prefix = "上坡" if self.slope > 0 else "下坡"
             parts.append(f"{prefix}坡度{abs(self.slope):.1f}%")
-        if all_fields or self.posture != 0:
-            parts.append("注意骑行姿态异常")
+        if self.posture == 0:
+            parts.append("注意：检测到跌倒/姿态异常")
+        elif all_fields:
+            status_map = {1: "右转弯", 2: "左转弯", 3: "上坡", 4: "下坡", 5: "正常骑行"}
+            parts.append(f"骑行状态：{status_map.get(self.posture, '未知')}")
         if all_fields or self.temperature > 0:
             parts.append(f"环境温度{self.temperature:.1f}摄氏度")
         if all_fields or self.heart_rate > 0:
