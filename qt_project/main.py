@@ -188,7 +188,16 @@ class BikeComputerPro(QWidget):
             print("[Main] LED 控制器初始化成功")
         except Exception as e:
             print(f"[Main] LED 控制器初始化失败: {e}")
-        
+
+        # 恢复上次保存的音量设置
+        try:
+            from ui.settings_page import SettingsPage
+            saved_vol = self.config.get("voice_volume", 85)
+            SettingsPage._set_system_volume(saved_vol)
+            print(f"[Main] 已恢复上次音量设置: {saved_vol}%")
+        except Exception as e:
+            print(f"[Main] 恢复音量设置失败: {e}")
+
         # 初始化 Ollama 本地大模型客户端
         self.ollama_client = None
         try:

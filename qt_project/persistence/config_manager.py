@@ -38,6 +38,7 @@ class ConfigManager:
         "aliyun_tts_model": "qwen3-tts-flash",
         "aliyun_bailian_api_key": "sk-77b02cb7cc3448509e84cc5b005ea87a",
         "aliyun_bailian_model": "qwen-turbo",
+        "voice_volume": 85,  # 播报音量 0-100
         "last_online_mode": True,  # True=online, False=offline
     }
 

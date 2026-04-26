@@ -13,7 +13,7 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSpinBox, QDoubleSpinBox, QPushButton, QFrame,
-    QCheckBox, QGridLayout, QMessageBox
+    QCheckBox, QGridLayout, QMessageBox, QSlider
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -153,6 +153,43 @@ class SettingsPage(QWidget):
 
         layout.addWidget(alert_card)
 
+        # 语音设置卡片
+        voice_card = QFrame()
+        voice_card.setStyleSheet("""
+            QFrame {
+                background-color: #2A2A2A;
+                border-radius: 12px;
+                border: 1px solid #3A3A4A;
+            }
+        """)
+        voice_layout = QVBoxLayout(voice_card)
+        voice_layout.setSpacing(10)
+        voice_layout.setContentsMargins(12, 10, 12, 10)
+
+        voice_title = QLabel("🔊 语音播报")
+        voice_title.setStyleSheet("color: #FFFFFF; background: transparent;")
+        voice_title.setFont(QFont("Helvetica", 13, QFont.Bold))
+        voice_layout.addWidget(voice_title)
+
+        slider_layout = QHBoxLayout()
+        slider_layout.setSpacing(12)
+
+        self.slider_volume = QSlider(Qt.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(self.config.get("voice_volume", 85))
+        self.slider_volume.setStyleSheet(self._slider_style())
+        self.slider_volume.valueChanged.connect(self._on_volume_changed)
+        slider_layout.addWidget(self.slider_volume, 1)
+
+        self.lbl_volume_val = QLabel(f"{self.slider_volume.value()}%")
+        self.lbl_volume_val.setStyleSheet("color: #FFFFFF; background: transparent;")
+        self.lbl_volume_val.setFont(QFont("Helvetica", 12, QFont.Bold))
+        self.lbl_volume_val.setFixedWidth(45)
+        slider_layout.addWidget(self.lbl_volume_val)
+
+        voice_layout.addLayout(slider_layout)
+        layout.addWidget(voice_card)
+
         # 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(16)
@@ -220,6 +257,49 @@ class SettingsPage(QWidget):
             }
         """
 
+    def _slider_style(self) -> str:
+        return """
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #555555;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #2ecc71;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                background: #FFFFFF;
+                border-radius: 8px;
+            }
+        """
+
+    def _on_volume_changed(self, value: int):
+        self.lbl_volume_val.setText(f"{value}%")
+
+    @staticmethod
+    def _set_system_volume(volume: int):
+        """通过 amixer 设置系统音量（覆盖在线/离线所有语音）"""
+        import subprocess
+        vol = max(0, min(100, volume))
+        # 优先设置 ReSpeaker 声卡（card 2），同时尝试默认声卡
+        cmds = [
+            ["amixer", "-c", "2", "set", "PCM", f"{vol}%", "unmute"],
+            ["amixer", "-c", "2", "set", "Headphone", f"{vol}%", "unmute"],
+            ["amixer", "-c", "2", "set", "Speaker", f"{vol}%", "unmute"],
+            ["amixer", "set", "Master", f"{vol}%", "unmute"],
+            ["amixer", "set", "PCM", f"{vol}%", "unmute"],
+        ]
+        for cmd in cmds:
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=3)
+            except Exception:
+                pass
+        print(f"[Settings] 系统音量已设置为 {vol}%")
+
     def _save_settings(self):
         self.config.set("heart_rate_max", self.spin_hr_max.value())
         self.config.set("heart_rate_min", self.spin_hr_min.value())
@@ -233,6 +313,10 @@ class SettingsPage(QWidget):
             "fall": self.chk_fall.isChecked(),
         }
         self.config.set("alerts_enabled", alerts)
+
+        # 保存并立即应用音量
+        self.config.set("voice_volume", self.slider_volume.value())
+        self._set_system_volume(self.slider_volume.value())
 
         self.config_saved.emit()
         QMessageBox.information(self, "保存成功", "设置已保存并生效")
@@ -252,6 +336,7 @@ class SettingsPage(QWidget):
             self.chk_hr.setChecked(True)
             self.chk_fatigue.setChecked(True)
             self.chk_fall.setChecked(True)
+            self.slider_volume.setValue(85)
             self._save_settings()
 
 
