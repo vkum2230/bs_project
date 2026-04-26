@@ -754,8 +754,8 @@ class BikeComputerPro(QWidget):
 
         # --- 消息框（固定 3 行消息高度，不被任何页面内容挤压） ---
         self.dialog_container = QWidget()
-        self.dialog_container.setMinimumHeight(96)
-        self.dialog_container.setMaximumHeight(96)
+        self.dialog_container.setMinimumHeight(104)
+        self.dialog_container.setMaximumHeight(104)
         self.dialog_container.setStyleSheet("background: transparent;")
 
         dialog_layout = QVBoxLayout(self.dialog_container)
@@ -763,8 +763,8 @@ class BikeComputerPro(QWidget):
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
-        self.dialog_box.setMinimumHeight(78)
-        self.dialog_box.setMaximumHeight(78)
+        self.dialog_box.setMinimumHeight(86)
+        self.dialog_box.setMaximumHeight(86)
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
