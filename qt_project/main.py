@@ -6,9 +6,9 @@ import os
 import serial
 import json
 import math
-from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, 
+from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QHBoxLayout, QFrame, QPushButton, QStackedWidget,
-                             QGridLayout, QSizePolicy, QWidget)
+                             QGridLayout, QSizePolicy, QWidget, QScrollArea)
 from PyQt5.QtCore import QTimer, QDateTime, Qt
 from PyQt5.QtGui import QFont, QCursor
 
@@ -731,20 +731,31 @@ class BikeComputerPro(QWidget):
         self.page_history = HistoryPage(ride_repo=self.ride_repo, parent=self)
         self.page_history.ride_selected.connect(self._on_history_ride_selected)
 
-        # --- 设置页面 ---
+        # --- 设置页面（用 QScrollArea 包装，避免内容过多撑大整体布局） ---
         self.page_settings = SettingsPage(config=self.config, parent=self)
         self.page_settings.config_saved.connect(self._on_config_saved)
 
+        scroll_settings = QScrollArea()
+        scroll_settings.setWidgetResizable(True)
+        scroll_settings.setFrameShape(QScrollArea.NoFrame)
+        scroll_settings.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_settings.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_settings.setStyleSheet("background-color: transparent; border: none;")
+        scroll_settings.setWidget(self.page_settings)
+
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.setMinimumHeight(0)
+        sp = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.stacked_widget.setSizePolicy(sp)
         self.stacked_widget.addWidget(self.page_data)
         self.stacked_widget.addWidget(self.page_map)
         self.stacked_widget.addWidget(self.page_history)
-        self.stacked_widget.addWidget(self.page_settings)
+        self.stacked_widget.addWidget(scroll_settings)
 
-        # --- 消息框 ---
+        # --- 消息框（双重保护：min+max 确保 layout 绝不压缩） ---
         self.dialog_container = QWidget()
-        self.dialog_container.setFixedHeight(145)
+        self.dialog_container.setMinimumHeight(145)
+        self.dialog_container.setMaximumHeight(145)
         self.dialog_container.setStyleSheet("background: transparent;")
 
         dialog_layout = QVBoxLayout(self.dialog_container)
@@ -752,7 +763,8 @@ class BikeComputerPro(QWidget):
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
-        self.dialog_box.setFixedHeight(120)
+        self.dialog_box.setMinimumHeight(120)
+        self.dialog_box.setMaximumHeight(120)
         self.dialog_box.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -773,13 +785,13 @@ class BikeComputerPro(QWidget):
         self.dialog_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         box_layout.addWidget(self.dialog_msg)
 
-        # 语音消息历史（最多显示最近2条，避免超出界面）
+        # 语音消息历史（固定显示最近 3 条）
         self.voice_messages = []
         self.max_voice_messages = 3
 
         dialog_layout.addWidget(self.dialog_box)
 
-        # 组装
+        # 组装：stacked_widget 扩张填充，dialog_container 固定不动
         self.content_layout.addWidget(self.stacked_widget, 1)
         self.content_layout.addWidget(self.dialog_container, 0)
 
