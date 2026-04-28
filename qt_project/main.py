@@ -262,20 +262,21 @@ class BikeComputerPro(QWidget):
         print("[Main] 骑行记录仓库已初始化")
         # ==========================================
 
+        # ========== 全局连接标志位 ==========
+        # 0=未连接, 1=WiFi/MQTT连接, 2=蓝牙连接
+        self.connect = 0
+        # 欢迎语音只播放一次
+        self._welcome_played = False
+        # ==================================
+
         # ========== 通信服务初始化 ==========
         self.comm_service = CommService(parent=self, ride_repo=self.ride_repo)
         self.comm_service.command_received.connect(self.on_app_command)
-        def _on_ble_connected(addr: str):
-            print(f"[Main] BLE App 已连接: {addr}")
-            self.add_voice_message("蓝牙连接成功", icon="🔵")
-
-        self.comm_service.ble_client_connected.connect(_on_ble_connected)
-        self.comm_service.wifi_client_connected.connect(
-            lambda addr: print(f"[Main] WiFi App 已连接: {addr}")
-        )
         self.comm_service.event_pushed.connect(self.on_comm_event)
+        self.comm_service.app_connected.connect(self._on_app_connected)
+        self.comm_service.app_disconnected.connect(self._on_app_disconnected)
         self.comm_service.start()
-        print("[Main] 通信服务已启动（BLE + WiFi）")
+        print("[Main] 通信服务已启动（MQTT + BLE）")
         # ==================================
 
         # ========== 骑行服务初始化 ==========
@@ -429,6 +430,19 @@ class BikeComputerPro(QWidget):
         )
         self.btn_map_mode.clicked.connect(self._toggle_map_mode)
 
+        # App 连接状态标识符
+        self.connect_indicator = QPushButton("连接")
+        self.connect_indicator.setFont(QFont("Helvetica", 11, QFont.Bold))
+        self.connect_indicator.setFixedSize(70, 30)
+        self.connect_indicator.setCursor(Qt.PointingHandCursor)
+        self._update_connect_indicator()
+        # 点击跳转到连接页面，长按断开连接
+        self.connect_indicator.pressed.connect(self._on_indicator_pressed)
+        self.connect_indicator.released.connect(self._on_indicator_released)
+        self._long_press_timer = QTimer(self)
+        self._long_press_timer.setSingleShot(True)
+        self._long_press_timer.timeout.connect(self._on_indicator_long_press)
+
         self.time_label = QLabel()
         self.time_label.setStyleSheet("color: #FFFFFF; background: transparent;")
         self.time_label.setFont(QFont("Arial", 17, QFont.Bold))
@@ -436,6 +450,7 @@ class BikeComputerPro(QWidget):
         self.right_layout.addWidget(self.zt_status_label)
         self.right_layout.addWidget(self.heading_label)
         self.right_layout.addWidget(self.btn_map_mode)
+        self.right_layout.addWidget(self.connect_indicator)
         self.right_layout.addWidget(self.time_label)
 
         self.status_layout.addWidget(self.left_container, 1)
@@ -760,6 +775,7 @@ class BikeComputerPro(QWidget):
         # --- 连接页面（首屏） ---
         self.page_connect = ConnectPage(parent=self)
         self.page_connect.skip_clicked.connect(self._enter_data_page)
+        self.page_connect.ble_advertising_requested.connect(self._on_ble_advertising_requested)
 
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.setMinimumHeight(0)
@@ -1028,8 +1044,10 @@ class BikeComputerPro(QWidget):
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.inactive_style)
         self.btn_settings.setStyleSheet(self.inactive_style)
-        # 进入数据页后播报欢迎语音
-        self._play_welcome_voice()
+        # 进入数据页后播报欢迎语音（只播放一次）
+        if not self._welcome_played:
+            self._welcome_played = True
+            self._play_welcome_voice()
 
     def show_data_page(self):
         self.stacked_widget.setCurrentIndex(1)
@@ -1191,6 +1209,114 @@ class BikeComputerPro(QWidget):
     def _on_config_saved(self):
         print("[Main] 配置已更新并保存")
         self.add_voice_message("设置已保存", icon="⚙️")
+
+    # --------------------------------------------------------------------------
+    # App 连接状态管理（xinjia.txt 协议）
+    # --------------------------------------------------------------------------
+
+    def _update_connect_indicator(self):
+        """更新状态栏连接标识符显示"""
+        if self.connect == 0:
+            self.connect_indicator.setText("连接")
+            self.connect_indicator.setStyleSheet("""
+                QPushButton {
+                    color: #9CA3AF;
+                    background-color: #2A2A2A;
+                    border-radius: 6px;
+                    border: 1px solid #444444;
+                }
+                QPushButton:pressed { background-color: #3A3A3A; }
+            """)
+        elif self.connect == 1:
+            self.connect_indicator.setText("📱 WiFi")
+            self.connect_indicator.setStyleSheet("""
+                QPushButton {
+                    color: #2ecc71;
+                    background-color: #2A2A2A;
+                    border-radius: 6px;
+                    border: 1px solid #2ecc71;
+                }
+                QPushButton:pressed { background-color: #3A3A3A; }
+            """)
+        elif self.connect == 2:
+            self.connect_indicator.setText("📱 BLE")
+            self.connect_indicator.setStyleSheet("""
+                QPushButton {
+                    color: #4DB8FF;
+                    background-color: #2A2A2A;
+                    border-radius: 6px;
+                    border: 1px solid #4DB8FF;
+                }
+                QPushButton:pressed { background-color: #3A3A3A; }
+            """)
+
+    def _on_indicator_pressed(self):
+        """按下连接标识符，启动长按检测定时器（800ms）"""
+        self._long_press_timer.start(800)
+
+    def _on_indicator_released(self):
+        """释放连接标识符"""
+        if self._long_press_timer.isActive():
+            # 定时器还在跑，说明是短按 → 跳转到连接页面
+            self._long_press_timer.stop()
+            self._goto_connect_page()
+        # 如果定时器已经触发（长按），则不做任何事（断开逻辑在 _on_indicator_long_press 中处理）
+
+    def _on_indicator_long_press(self):
+        """长按连接标识符：主动断开 App 连接"""
+        if self.connect != 0:
+            print("[Main] 长按断开 App 连接")
+            self.add_voice_message("已断开与手机的连接", icon="📱")
+            self.comm_service.disconnect_app()
+            self.connect = 0
+            self._update_connect_indicator()
+        else:
+            print("[Main] 当前未连接，长按无效")
+
+    def _goto_connect_page(self):
+        """点击连接标识符：跳转到第一界面（连接页面）"""
+        print("[Main] 跳转到连接页面")
+        self.stacked_widget.setCurrentIndex(0)
+        self.status_bar.hide()
+        self.line.hide()
+        self.dialog_container.hide()
+        # 解除内容区高度限制，让连接页面能完整显示
+        self.content_container.setMaximumHeight(16777215)
+        # 重置导航按钮样式
+        self.btn_data.setStyleSheet(self.inactive_style)
+        self.btn_map.setStyleSheet(self.inactive_style)
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_settings.setStyleSheet(self.inactive_style)
+
+    def _on_ble_advertising_requested(self):
+        """连接页面的'开始广播'按钮被点击"""
+        print("[Main] 开始 BLE 广播")
+        self.comm_service.start_ble()
+        self.page_connect.on_ble_advertising_started()
+
+    def _on_app_connected(self, channel: str):
+        """App 已通过任一通道连接"""
+        if channel == "mqtt":
+            self.connect = 1
+            self.add_voice_message("WiFi 连接成功", icon="📶")
+        elif channel == "ble":
+            self.connect = 2
+            self.add_voice_message("蓝牙连接成功", icon="🔵")
+        self._update_connect_indicator()
+        # 自动跳转到数据界面（如果当前在连接页面）
+        if self.stacked_widget.currentIndex() == 0:
+            self._enter_data_page()
+
+    def _on_app_disconnected(self, channel: str):
+        """App 断开连接"""
+        print(f"[Main] App 已通过 [{channel}] 断开")
+        # 只有当当前通道与连接通道匹配时才置为 0
+        if (channel == "mqtt" and self.connect == 1) or (channel == "ble" and self.connect == 2):
+            self.connect = 0
+            self._update_connect_indicator()
+            self.add_voice_message("与手机的连接已断开", icon="📱")
+
+    # --------------------------------------------------------------------------
 
     def safe_exit(self):
         print("退出程序...")
@@ -1603,7 +1729,7 @@ class BikeComputerPro(QWidget):
         print("[Voice] ========== 欢迎语音处理完成 ==========")
 
     def on_app_command(self, cmd):
-        """处理 App 发来的命令"""
+        """处理 App 发来的命令（xinjia.txt 协议）"""
         from core.protocol import AppCommandType
         print(f"[Main] 执行 App 命令: {cmd.cmd_type.value}")
 
@@ -1618,6 +1744,56 @@ class BikeComputerPro(QWidget):
 
         elif cmd.cmd_type == AppCommandType.STOP_RIDE:
             self.ride_service.stop_ride()
+
+        elif cmd.cmd_type == AppCommandType.SET_RIDE_STATE:
+            # xinjia.txt: 1=骑行中 2=暂停 3=恢复 4=结束
+            state_map = {1: "riding", 2: "paused", 3: "riding", 4: "finished"}
+            state_val = cmd.payload.get("ride_state", 1)
+            state_str = state_map.get(state_val, "riding")
+            if state_str == "riding" and self.ride_service.state.value == "idle":
+                self.ride_service.start_ride()
+            elif state_str == "paused":
+                self.ride_service.pause_ride()
+            elif state_str == "finished":
+                self.ride_service.stop_ride()
+            elif state_str == "riding" and self.ride_service.state.value == "paused":
+                self.ride_service.resume_ride()
+
+        elif cmd.cmd_type == AppCommandType.SET_NAV_DESTINATION:
+            gps = cmd.payload.get("gps", {})
+            lat = gps.get("lat")
+            lon = gps.get("lon")
+            name = cmd.payload.get("name", "目的地")
+            if lat is not None and lon is not None:
+                print(f"[Main] 设置导航目的地: {name} ({lat}, {lon})")
+                # 如果有地图页面且支持设置目的地
+                if hasattr(self, 'page_map') and self.page_map and hasattr(self.page_map, 'set_destination'):
+                    self.page_map.set_destination(lat, lon, name)
+                self.add_voice_message(f"导航到{name}", icon="🧭")
+
+        elif cmd.cmd_type == AppCommandType.SET_THRESHOLD:
+            print(f"[Main] 设置阈值: {cmd.payload}")
+            # 保存到配置中
+            config = get_config()
+            if "heart_rate_max" in cmd.payload:
+                config.set("heart_rate_max", cmd.payload["heart_rate_max"])
+            if "heart_rate_min" in cmd.payload:
+                config.set("heart_rate_min", cmd.payload["heart_rate_min"])
+            if "rear_dist_alert" in cmd.payload:
+                config.set("rear_dist_alert", cmd.payload["rear_dist_alert"])
+            if "weight" in cmd.payload:
+                config.set("weight", cmd.payload["weight"])
+            config.save()
+            self.add_voice_message("阈值已更新", icon="⚙️")
+
+        elif cmd.cmd_type == AppCommandType.SET_ALERT_SWITCH:
+            alert_name = cmd.payload.get("alert", "")
+            enabled = cmd.payload.get("enabled", True)
+            print(f"[Main] 设置告警开关: {alert_name} = {enabled}")
+            config = get_config()
+            config.set(f"alert_{alert_name}", enabled)
+            config.save()
+            self.add_voice_message(f"{alert_name}告警已{'开启' if enabled else '关闭'}", icon="🔔")
 
         elif cmd.cmd_type == AppCommandType.PING:
             pass

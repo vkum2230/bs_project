@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-通信调度器（CommService）
+通信调度器（CommService）— xinjia.txt 协议集成版
 
 职责：
-- 统一调度 BLE、WiFi、MQTT 三条通信通道
+- 统一调度 BLE、MQTT 两条通信通道（WebSocket 已删除）
 - 接收 STM32 高频传感器数据，合并为 1Hz 低频 App 数据包
 - 实时数据定时推（1秒1次）+ 事件数据立即推
 - 断连期间缓存数据，重连后自动补发
 - 将 App 命令转发给主程序
 
-架构：
-    [SensorData] ──▶ DataBuffer ──▶ 定时器 1Hz ──▶ BLE Notify + WiFi JSON + MQTT Pub
-    [事件触发] ──────────────────────▶ 立即推送 ──▶ BLE + WiFi + MQTT 三发
-    [断连状态] ──────────────────────▶ BufferQueue ──▶ 重连后 WiFi/MQTT 批量补发
+MQTT 主题（xinjia.txt）：
+- deviceData_1   : 实时数据推送（每秒）
+- delayData_1    : 非实时数据/事件推送
+- deviceHeart_1  : 设备心跳（每5秒）+ 连接握手
+- appHeart_1     : 接收 App 心跳/连接请求
+- appData_1      : 接收 App 命令
+
+BLE：
+- JSON 透传，协议格式与 MQTT 一致
+- 连接成功后发送 {"isConnect":"OK"}
+- 心跳每5秒 {"type":"heartbeat","timestamp":"...","device":"SMART-RIDE","channel":"ble"}
 """
 
 import json
@@ -33,21 +40,22 @@ from core.protocol import (
     build_alert_payload,
 )
 from drivers.ble_server import BleServer
-from drivers.wifi_server import WifiServer
 from persistence.buffer_queue import BufferQueue
 from persistence.ride_repository import RideRepository
 
 
 # ==============================================================================
-# MQTT 桥接器（兼容 paho-mqtt 1.x / 2.x）
+# MQTT 桥接器（xinjia.txt 协议）
 # ==============================================================================
 
 class MqttBridge:
     """
-    MQTT 调试桥接器
-    - 发布实时数据到 smartride/realtime
-    - 发布事件到 smartride/event
-    - 订阅 smartride/command 接收调试命令
+    MQTT 通信桥接器
+    - 发布实时数据到 deviceData_1
+    - 发布事件/非实时数据到 delayData_1
+    - 发布心跳到 deviceHeart_1
+    - 订阅 appHeart_1 接收 App 连接请求
+    - 订阅 appData_1 接收 App 命令
     """
 
     def __init__(
@@ -58,6 +66,7 @@ class MqttBridge:
         on_command: Optional[Callable[[str, str], None]] = None,
         on_connected: Optional[Callable[[], None]] = None,
         on_disconnected: Optional[Callable[[], None]] = None,
+        on_app_connect: Optional[Callable[[], None]] = None,
     ):
         self.broker = broker
         self.port = port
@@ -65,20 +74,27 @@ class MqttBridge:
         self.on_command = on_command
         self.on_connected = on_connected
         self.on_disconnected = on_disconnected
+        self.on_app_connect = on_app_connect  # App 通过 appHeart_1 发来连接请求
         self._client = None
         self._connected = False
+        self._app_connected = False  # App 是否已握手连接
+
+        # xinjia.txt 协议主题
         self._topics = {
-            "realtime": "smartride/realtime",
-            "event": "smartride/event",
-            "buffer": "smartride/buffer",
-            "command": "smartride/command",
+            "deviceData": "deviceData_1",
+            "delayData": "delayData_1",
+            "deviceHeart": "deviceHeart_1",
+            "appHeart": "appHeart_1",
+            "appData": "appData_1",
         }
+
+        # 心跳定时器
+        self._heartbeat_timer = None
 
     def start(self):
         try:
             import paho.mqtt.client as mqtt
 
-            # 兼容 paho-mqtt 2.0+ 的 CallbackAPIVersion 参数
             try:
                 self._client = mqtt.Client(
                     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -91,7 +107,6 @@ class MqttBridge:
             self._client.on_disconnect = self._on_disconnect
             self._client.on_message = self._on_message
 
-            # 自动重连：1~15 秒退避
             try:
                 self._client.reconnect_delay_set(min_delay=1, max_delay=15)
             except Exception:
@@ -102,12 +117,14 @@ class MqttBridge:
             print(f"[MqttBridge] MQTT 连接启动: {self.broker}:{self.port}")
 
         except ImportError:
-            print("[MqttBridge] 警告: paho-mqtt 未安装，MQTT 调试通道不可用")
-            print("           安装命令: pip3 install paho-mqtt")
+            print("[MqttBridge] 警告: paho-mqtt 未安装，MQTT 通道不可用")
         except Exception as e:
             print(f"[MqttBridge] 启动失败: {e}")
 
     def stop(self):
+        if self._heartbeat_timer:
+            self._heartbeat_timer.stop()
+            self._heartbeat_timer = None
         if self._client:
             try:
                 self._client.loop_stop()
@@ -116,6 +133,7 @@ class MqttBridge:
                 pass
             self._client = None
             self._connected = False
+            self._app_connected = False
 
     def publish(self, topic_key: str, payload: str or dict or bytes, qos: int = 0):
         if not self._client or not self._connected:
@@ -127,7 +145,6 @@ class MqttBridge:
             payload = payload.encode("utf-8")
         try:
             result = self._client.publish(topic, payload, qos=qos)
-            # paho-mqtt 2.x result.rc 是 ReasonCodes 对象
             rc = getattr(result, "rc", None)
             rc_val = rc.value if hasattr(rc, "value") else rc
             if rc is not None and rc != 0:
@@ -135,17 +152,35 @@ class MqttBridge:
         except Exception as e:
             print(f"[MqttBridge] 发布失败 [{topic}]: {e}")
 
+    def _start_heartbeat(self):
+        """启动每5秒心跳"""
+        if self._heartbeat_timer:
+            return
+        self._heartbeat_timer = QTimer()
+        self._heartbeat_timer.timeout.connect(self._send_heartbeat)
+        self._heartbeat_timer.start(5000)
+        self._send_heartbeat()  # 立即发一次
+
+    def _send_heartbeat(self):
+        """发送设备心跳"""
+        if not self._connected:
+            return
+        payload = {"isConnect": "continue"}
+        self.publish("deviceHeart", payload)
+        print("[MqttBridge] 心跳已发送")
+
     def _on_connect(self, client, userdata, flags, rc, *args):
-        # paho 2.x rc 是 ReasonCodes 对象，打印其值更直观
         rc_val = getattr(rc, "value", rc) if hasattr(rc, "value") else rc
         if rc == 0:
             self._connected = True
-            print(f"[MqttBridge] MQTT 连接成功 (client_id={client._client_id}, rc={rc_val})")
+            print(f"[MqttBridge] MQTT 连接成功 (client_id={client._client_id})")
             try:
-                client.subscribe(self._topics["command"])
-                print(f"[MqttBridge] 已订阅命令主题: {self._topics['command']}")
+                client.subscribe(self._topics["appHeart"])
+                client.subscribe(self._topics["appData"])
+                print(f"[MqttBridge] 已订阅: {self._topics['appHeart']}, {self._topics['appData']}")
             except Exception as e:
                 print(f"[MqttBridge] 订阅失败: {e}")
+            self._start_heartbeat()
             if self.on_connected:
                 try:
                     self.on_connected()
@@ -156,8 +191,12 @@ class MqttBridge:
 
     def _on_disconnect(self, client, userdata, disconnect_flags, rc, properties=None):
         self._connected = False
+        self._app_connected = False
         rc_val = getattr(rc, "value", rc) if hasattr(rc, "value") else rc
-        print(f"[MqttBridge] MQTT 已断开 (rc={rc_val}, flags={disconnect_flags})")
+        print(f"[MqttBridge] MQTT 已断开 (rc={rc_val})")
+        if self._heartbeat_timer:
+            self._heartbeat_timer.stop()
+            self._heartbeat_timer = None
         if self.on_disconnected:
             try:
                 self.on_disconnected()
@@ -167,10 +206,42 @@ class MqttBridge:
     def _on_message(self, client, userdata, msg):
         try:
             text = msg.payload.decode("utf-8", errors="ignore").strip()
-            if text and self.on_command:
+            if not text:
+                return
+            topic = msg.topic
+            print(f"[MqttBridge] 收到 [{topic}]: {text}")
+
+            # App 心跳/连接请求
+            if topic == self._topics["appHeart"]:
+                try:
+                    data = json.loads(text)
+                    if data.get("isConnect") == "OK":
+                        # App 请求连接，回复确认
+                        self._app_connected = True
+                        self.publish("deviceHeart", {"isConnect": "OK"})
+                        print("[MqttBridge] App 已连接（握手成功）")
+                        if self.on_app_connect:
+                            self.on_app_connect()
+                except Exception as e:
+                    print(f"[MqttBridge] appHeart 解析失败: {e}")
+                return
+
+            # App 命令
+            if topic == self._topics["appData"] and self.on_command:
                 self.on_command(text, channel="mqtt")
+
         except Exception as e:
             print(f"[MqttBridge] 消息处理失败: {e}")
+
+    def is_app_connected(self) -> bool:
+        """App 是否已通过握手连接"""
+        return self._app_connected
+
+    def disconnect_app(self):
+        """主动断开 App 连接"""
+        self._app_connected = False
+        self.publish("deviceHeart", {"isConnect": "OK"})
+        print("[MqttBridge] 已发送断开通知")
 
 
 # ==============================================================================
@@ -191,20 +262,15 @@ class DataBuffer:
             self._buffer.popleft()
 
     def get_merged(self, ride_state: RideSessionState) -> AppRealtimeData:
-        """合并最近 1 秒的数据为一条 AppRealtimeData"""
         if not self._buffer:
             return AppRealtimeData(ride_state=ride_state.value)
-
         latest = self._buffer[-1]
         n = len(self._buffer)
-
-        # 速度、功率、心率取平均值更平滑；踏频、距离取最新值
         avg_speed = sum(s.speed for s in self._buffer) / n
         avg_power = sum(s.power for s in self._buffer) / n
         avg_hr = sum(s.heart_rate for s in self._buffer) / n
         avg_temp = sum(s.temperature for s in self._buffer) / n
         avg_rear = sum(s.rear_dist for s in self._buffer) / n
-
         return AppRealtimeData(
             speed=round(avg_speed, 1),
             cadence=latest.cadence,
@@ -236,92 +302,92 @@ class CommService(QObject):
     # 通道连接状态变化
     ble_client_connected = pyqtSignal(str)
     ble_client_disconnected = pyqtSignal()
-    wifi_client_connected = pyqtSignal(str)
-    wifi_client_disconnected = pyqtSignal(str)
     mqtt_connected = pyqtSignal()
     mqtt_disconnected = pyqtSignal()
+    app_connected = pyqtSignal(str)      # 参数: "mqtt" 或 "ble"
+    app_disconnected = pyqtSignal(str)   # 参数: "mqtt" 或 "ble"
 
-    # 内部状态变化（可选外部监听）
+    # 内部状态变化
     data_pushed = pyqtSignal(AppRealtimeData)
-    event_pushed = pyqtSignal(str, dict)  # event_type, payload
+    event_pushed = pyqtSignal(str, dict)
 
     def __init__(self, parent=None, ride_repo: Optional[RideRepository] = None):
         super().__init__(parent)
         self.ride_state = RideSessionState.IDLE
         self.ride_repo = ride_repo
 
-        # 数据缓存与断连队列
         self.data_buffer = DataBuffer(window_seconds=1.0)
         self.buffer_queue = BufferQueue(max_items=5000, max_age_seconds=1800)
 
-        # 各通道最后成功推送时间戳（用于断连补发）
         self.ble_last_push_time = 0.0
-        self.wifi_last_push_time = 0.0
         self.mqtt_last_push_time = 0.0
 
-        # BLE / WiFi 服务器
+        # BLE 服务器（默认不启动，等用户点击"开始广播"）
         self.ble_server = BleServer(host_address="2C:CF:67:F2:ED:B2", port=1)
-        self.wifi_server = WifiServer(host="0.0.0.0", port=8765)
 
-        # MQTT 调试桥接器
+        # MQTT 桥接器
         self.mqtt_bridge = MqttBridge(
             broker="broker.emqx.io",
             port=1883,
-            client_id=None,  # 不固定 client_id，避免公共 broker 冲突
+            client_id=None,
             on_command=self._on_mqtt_command,
-            on_connected=lambda: (self.mqtt_connected.emit(), self._flush_buffer_for_channel("mqtt")),
-            on_disconnected=lambda: self.mqtt_disconnected.emit(),
+            on_connected=lambda: self.mqtt_connected.emit(),
+            on_disconnected=lambda: (self.mqtt_disconnected.emit(), self.app_disconnected.emit("mqtt")),
+            on_app_connect=lambda: self._on_app_connect("mqtt"),
         )
 
-        # 绑定信号
+        # BLE 信号绑定
         self.ble_server.client_connected.connect(self._on_ble_connected)
         self.ble_server.client_disconnected.connect(self._on_ble_disconnected)
         self.ble_server.command_received.connect(self._on_ble_command)
         self.ble_server.error_occurred.connect(lambda e: print(f"[CommService] BLE错误: {e}"))
-
-        self.wifi_server.client_connected.connect(self._on_wifi_connected)
-        self.wifi_server.client_disconnected.connect(self._on_wifi_disconnected)
-        self.wifi_server.command_received.connect(self._on_wifi_command)
-        self.wifi_server.error_occurred.connect(lambda e: print(f"[CommService] WiFi错误: {e}"))
 
         # 定时器：1Hz 推送实时数据
         self.push_timer = QTimer(self)
         self.push_timer.timeout.connect(self._push_realtime_data)
         self.push_timer.start(1000)
 
+        # BLE 心跳定时器
+        self._ble_heartbeat_timer = QTimer(self)
+        self._ble_heartbeat_timer.timeout.connect(self._send_ble_heartbeat)
+
         self._servers_started = False
+        self._ble_started = False
 
     def start(self):
-        """启动 BLE、WiFi、MQTT 服务"""
+        """启动 MQTT 服务（BLE 等用户点击按钮后再启动）"""
         if self._servers_started:
             return
         print("[CommService] 启动通信服务...")
-        self.ble_server.start()
-        self.wifi_server.start()
         self.mqtt_bridge.start()
         self._servers_started = True
+
+    def start_ble(self):
+        """启动 BLE 广播（由连接页面的'开始广播'按钮触发）"""
+        if self._ble_started:
+            return
+        print("[CommService] 启动 BLE 广播...")
+        self.ble_server.start_advertising()
+        self._ble_started = True
 
     def stop(self):
         """停止所有通信服务"""
         print("[CommService] 停止通信服务...")
         self.push_timer.stop()
+        self._ble_heartbeat_timer.stop()
         self.ble_server.stop()
-        self.wifi_server.stop()
         self.mqtt_bridge.stop()
         self._servers_started = False
+        self._ble_started = False
 
     # --------------------------------------------------------------------------
-    # 数据入口（由 main.py 的串口接收回调调用）
+    # 数据入口
     # --------------------------------------------------------------------------
 
     def on_sensor_data(self, sensor: SensorData):
-        """每收到一条 STM32 数据就调用"""
         self.data_buffer.push(sensor)
 
-        # 注：实时告警检测已迁移到 AlertService，避免重复鬼畜
-
     def set_ride_state(self, state: RideSessionState):
-        """更新当前骑行状态"""
         old_state = self.ride_state
         self.ride_state = state
         if old_state != state:
@@ -335,39 +401,28 @@ class CommService(QObject):
     # --------------------------------------------------------------------------
 
     def _push_realtime_data(self):
-        """每秒执行一次：合并数据并并行推送到所有可用通道"""
         app_data = self.data_buffer.get_merged(self.ride_state)
         self.data_pushed.emit(app_data)
         now = time.time()
-
-        # 无论通道是否连接，数据都进入 BufferQueue（用于断连补发）
         self.buffer_queue.push(app_data)
 
-        # 并行推送到所有可用通道
         pushed_count = 0
 
-        # BLE：走紧凑二进制
+        # BLE
         if self.ble_server.has_connected_client():
             try:
-                self.ble_server.notify(app_data.to_ble_bytes())
+                payload = self._build_realtime_payload(app_data)
+                self.ble_server.notify(json.dumps(payload, ensure_ascii=False))
                 self.ble_last_push_time = now
                 pushed_count += 1
             except Exception as e:
                 print(f"[CommService] BLE推送失败: {e}")
 
-        # WiFi：走完整 JSON（主力通道）
-        if self.wifi_server.has_connected_client():
-            try:
-                self.wifi_server.broadcast(app_data.to_json())
-                self.wifi_last_push_time = now
-                pushed_count += 1
-            except Exception as e:
-                print(f"[CommService] WiFi推送失败: {e}")
-
         # MQTT
-        if self.mqtt_bridge._connected:
+        if self.mqtt_bridge.is_app_connected():
             try:
-                self.mqtt_bridge.publish("realtime", app_data.to_dict())
+                payload = self._build_realtime_payload(app_data)
+                self.mqtt_bridge.publish("deviceData", payload)
                 self.mqtt_last_push_time = now
                 pushed_count += 1
             except Exception as e:
@@ -376,9 +431,26 @@ class CommService(QObject):
         if pushed_count == 0:
             print("[CommService] 所有通道断开，数据已缓存")
 
+    def _build_realtime_payload(self, app_data: AppRealtimeData) -> dict:
+        """构建 xinjia.txt 实时数据消息体"""
+        t = time.strftime("%H:%M:%S", time.localtime())
+        return {
+            "type": "realtime",
+            "timestamp": t,
+            "data": {
+                "speed": app_data.speed,
+                "cadence": app_data.cadence,
+                "power": app_data.power,
+                "heart_rate": app_data.heart_rate,
+                "slope": app_data.slope,
+                "temperature": app_data.temperature,
+                "rear_dist": app_data.rear_dist,
+                "gps": app_data.gps.to_dict() if app_data.gps else {"lat": 0.0, "lon": 0.0},
+            }
+        }
+
     @staticmethod
     def _get_alert_type(name: str):
-        """辅助：从字符串名转换为 AlertType（容错）"""
         from core.protocol import AlertType
         try:
             return AlertType(name)
@@ -386,77 +458,71 @@ class CommService(QObject):
             return AlertType.REAR_VEHICLE
 
     def send_alert(self, alert_type, message: str, level: str = "warning"):
-        """公开接口：发送告警事件到 App（供 AlertService 调用）"""
         from core.protocol import build_alert_payload
         payload = build_alert_payload(alert_type, message, level)
         self._push_event("alert", payload)
 
     def _push_event(self, event_type: str, payload: dict):
-        """立即推送事件到所有可用通道"""
         self.event_pushed.emit(event_type, payload)
-        event_json = json.dumps({"event": event_type, "data": payload}, ensure_ascii=False)
+        t = time.strftime("%H:%M:%S", time.localtime())
 
+        # BLE
         if self.ble_server.has_connected_client():
             try:
-                self.ble_server.notify(event_json)
+                event_payload = {
+                    "type": "event",
+                    "timestamp": t,
+                    "event": event_type,
+                    "data": payload,
+                }
+                self.ble_server.notify(json.dumps(event_payload, ensure_ascii=False))
             except Exception as e:
                 print(f"[CommService] BLE事件推送失败: {e}")
 
-        if self.wifi_server.has_connected_client():
+        # MQTT
+        if self.mqtt_bridge.is_app_connected():
             try:
-                self.wifi_server.broadcast(event_json)
-            except Exception as e:
-                print(f"[CommService] WiFi事件推送失败: {e}")
-
-        if self.mqtt_bridge._connected:
-            try:
-                self.mqtt_bridge.publish("event", {"event": event_type, "data": payload})
+                event_payload = {
+                    "type": "event",
+                    "timestamp": t,
+                    "event": event_type,
+                    "data": payload,
+                }
+                self.mqtt_bridge.publish("delayData", event_payload)
             except Exception as e:
                 print(f"[CommService] MQTT事件推送失败: {e}")
 
     def _flush_buffer_for_channel(self, channel: str):
-        """为指定通道补发断连期间的数据"""
         if self.buffer_queue.is_empty():
             return
-
         time_map = {
             "ble": self.ble_last_push_time,
-            "wifi": self.wifi_last_push_time,
             "mqtt": self.mqtt_last_push_time,
         }
         cutoff = time_map.get(channel, 0)
         if cutoff <= 0:
             return
-
         items = self.buffer_queue.get_since(cutoff)
         if not items:
             return
-
         print(f"[CommService] [{channel}] 补发缓存数据: {len(items)} 条")
-        # 分批次发送，避免一次性发送太多导致阻塞
         BATCH_SIZE = 50
         for i in range(0, len(items), BATCH_SIZE):
             batch = items[i:i + BATCH_SIZE]
-            batch_payload = {"event": "buffer_sync", "data": batch}
+            batch_payload = {"type": "buffer_sync", "timestamp": time.strftime("%H:%M:%S"), "data": batch}
             batch_json = json.dumps(batch_payload, ensure_ascii=False)
             try:
                 if channel == "ble" and self.ble_server.has_connected_client():
                     self.ble_server.notify(batch_json)
-                elif channel == "wifi" and self.wifi_server.has_connected_client():
-                    self.wifi_server.broadcast(batch_json)
-                elif channel == "mqtt" and self.mqtt_bridge._connected:
-                    self.mqtt_bridge.publish("buffer", batch_payload)
+                elif channel == "mqtt" and self.mqtt_bridge.is_app_connected():
+                    self.mqtt_bridge.publish("delayData", batch_payload)
             except Exception as e:
                 print(f"[CommService] [{channel}] 补发失败: {e}")
                 return
-
-        # 更新该通道的最后推送时间
         if items:
             latest_ts = items[-1].get("timestamp", time.time())
             if channel == "ble":
                 self.ble_last_push_time = latest_ts
-            elif channel == "wifi":
-                self.wifi_last_push_time = latest_ts
             elif channel == "mqtt":
                 self.mqtt_last_push_time = latest_ts
 
@@ -467,26 +533,21 @@ class CommService(QObject):
     def _on_ble_command(self, text: str):
         self._handle_command(text, channel="ble")
 
-    def _on_wifi_command(self, text: str):
-        self._handle_command(text, channel="wifi")
-
     def _on_mqtt_command(self, text: str, channel: str = "mqtt"):
         self._handle_command(text, channel="mqtt")
 
     def _handle_command(self, text: str, channel: str):
-        """解析并转发 App 命令"""
         try:
             cmd = AppCommand.from_json(text)
             print(f"[CommService] 收到 [{channel}] 命令: {cmd.cmd_type.value}")
 
-            # 文件与数据请求由 CommService 直接响应
-            if cmd.cmd_type == AppCommandType.REQUEST_HISTORY:
+            if cmd.cmd_type.value == "request_history":
                 self._handle_request_history()
                 return
-            if cmd.cmd_type == AppCommandType.REQUEST_FIT:
+            if cmd.cmd_type.value == "request_fit":
                 self._handle_request_file(cmd.payload, "fit")
                 return
-            if cmd.cmd_type == AppCommandType.REQUEST_GPX:
+            if cmd.cmd_type.value == "request_gpx":
                 self._handle_request_file(cmd.payload, "gpx")
                 return
 
@@ -495,39 +556,35 @@ class CommService(QObject):
             print(f"[CommService] 命令解析失败: {e}, 原文: {text}")
 
     def _handle_request_history(self):
-        """响应历史记录列表请求"""
         if not self.ride_repo:
-            self._reply_json({"event": "history_list", "data": [], "error": "repo not ready"})
+            self._reply_json({"type": "history", "timestamp": time.strftime("%H:%M:%S"), "data": [], "error": "repo not ready"})
             return
         rides = self.ride_repo.list_rides(limit=50)
-        self._reply_json({"event": "history_list", "data": rides})
+        self._reply_json({"type": "history", "timestamp": time.strftime("%H:%M:%S"), "data": rides})
 
     def _handle_request_file(self, payload: dict, ext: str):
-        """响应 FIT/GPX 文件下载请求"""
         ride_id = payload.get("ride_id", "")
         if not ride_id or not self.ride_repo:
-            self._reply_json({"event": "file_response", "error": "missing ride_id or repo"})
+            self._reply_json({"type": "file_response", "timestamp": time.strftime("%H:%M:%S"), "error": "missing ride_id or repo"})
             return
-
         meta = self.ride_repo.get_ride(ride_id)
         if not meta:
-            self._reply_json({"event": "file_response", "error": "ride not found"})
+            self._reply_json({"type": "file_response", "timestamp": time.strftime("%H:%M:%S"), "error": "ride not found"})
             return
-
         path_key = f"{ext}_path"
         file_path = meta.get(path_key, "")
         if not file_path or not os.path.exists(file_path):
-            self._reply_json({"event": "file_response", "error": f"{ext} file not found"})
+            self._reply_json({"type": "file_response", "timestamp": time.strftime("%H:%M:%S"), "error": f"{ext} file not found"})
             return
-
         try:
             import base64
             with open(file_path, "rb") as f:
                 data = f.read()
             encoded = base64.b64encode(data).decode("utf-8")
             self._reply_json({
-                "event": "file_response",
-                "type": ext,
+                "type": "file_response",
+                "timestamp": time.strftime("%H:%M:%S"),
+                "file_type": ext,
                 "ride_id": ride_id,
                 "filename": os.path.basename(file_path),
                 "size": len(data),
@@ -535,15 +592,13 @@ class CommService(QObject):
             })
             print(f"[CommService] 已发送 {ext.upper()} 文件: {os.path.basename(file_path)} ({len(data)} bytes)")
         except Exception as e:
-            self._reply_json({"event": "file_response", "error": str(e)})
+            self._reply_json({"type": "file_response", "timestamp": time.strftime("%H:%M:%S"), "error": str(e)})
 
     def _reply_json(self, payload: dict):
-        """通过 WiFi 广播 JSON 响应"""
-        if self.wifi_server.has_connected_client():
-            self.wifi_server.broadcast(json.dumps(payload, ensure_ascii=False))
-        # 同时通过 MQTT 发布
-        event_type = payload.get("event", "reply")
-        self.mqtt_bridge.publish(event_type, payload)
+        if self.ble_server.has_connected_client():
+            self.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+        if self.mqtt_bridge.is_app_connected():
+            self.mqtt_bridge.publish("delayData", payload)
 
     # --------------------------------------------------------------------------
     # 连接状态回调
@@ -551,36 +606,68 @@ class CommService(QObject):
 
     def _on_ble_connected(self, addr: str):
         print(f"[CommService] BLE 客户端已连接: {addr}")
+        # 发送握手帧
+        try:
+            self.ble_server.notify('{"isConnect":"OK"}')
+        except Exception as e:
+            print(f"[CommService] BLE握手发送失败: {e}")
+        self._on_app_connect("ble")
         self.ble_client_connected.emit(addr)
         self._flush_buffer_for_channel("ble")
+        # 启动 BLE 心跳
+        self._ble_heartbeat_timer.start(5000)
+        self._send_ble_heartbeat()
 
     def _on_ble_disconnected(self):
         print("[CommService] BLE 客户端已断开")
+        self._ble_heartbeat_timer.stop()
+        self.app_disconnected.emit("ble")
         self.ble_client_disconnected.emit()
 
-    def _on_wifi_connected(self, addr: str):
-        print(f"[CommService] WiFi 客户端已连接: {addr}")
-        self.wifi_client_connected.emit(addr)
-        self._flush_buffer_for_channel("wifi")
+    def _on_app_connect(self, channel: str):
+        """App 已通过任一通道连接"""
+        print(f"[CommService] App 已通过 [{channel}] 连接")
+        self.app_connected.emit(channel)
 
-    def _on_wifi_disconnected(self, addr: str):
-        print(f"[CommService] WiFi 客户端已断开: {addr}")
-        self.wifi_client_disconnected.emit(addr)
+    def _send_ble_heartbeat(self):
+        """发送 BLE 心跳"""
+        if not self.ble_server.has_connected_client():
+            return
+        payload = {
+            "type": "heartbeat",
+            "timestamp": time.strftime("%H:%M:%S"),
+            "device": "SMART-RIDE",
+            "channel": "ble",
+        }
+        try:
+            self.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+        except Exception as e:
+            print(f"[CommService] BLE心跳发送失败: {e}")
 
     # --------------------------------------------------------------------------
     # 便捷查询接口
     # --------------------------------------------------------------------------
 
     def has_any_client(self) -> bool:
-        """是否有任一 App 客户端连接（BLE / WiFi）"""
-        return self.ble_server.has_connected_client() or self.wifi_server.has_connected_client()
+        return self.ble_server.has_connected_client() or self.mqtt_bridge.is_app_connected()
 
     def get_channel_status(self) -> dict:
-        """获取通道状态摘要"""
         return {
             "ble_connected": self.ble_server.has_connected_client(),
-            "wifi_connected": self.wifi_server.has_connected_client(),
             "mqtt_connected": self.mqtt_bridge._connected,
+            "app_mqtt_connected": self.mqtt_bridge.is_app_connected(),
             "buffer_count": self.buffer_queue.size(),
             "ride_state": self.ride_state.value,
         }
+
+    def disconnect_app(self):
+        """主动断开 App 连接"""
+        if self.mqtt_bridge.is_app_connected():
+            self.mqtt_bridge.disconnect_app()
+            self.app_disconnected.emit("mqtt")
+        if self.ble_server.has_connected_client():
+            try:
+                self.ble_server.notify('{"isConnect":"OK"}')
+            except Exception:
+                pass
+            self.app_disconnected.emit("ble")

@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-蓝牙服务器（基于经典蓝牙 RFCOMM）
+蓝牙服务器（基于经典蓝牙 RFCOMM）— xinjia.txt 协议
 
 设计说明：
-- 本模块参考 test_ble.py 的经典蓝牙 Socket 实现
-- 为了快速稳定地实现双向通信，采用 RFCOMM 串口透传模式
-- 如需对接标准骑行 App（Zwift/Wahoo），未来可替换为 BLE GATT 实现
-
-职责：
-- 作为蓝牙服务端等待手机 App 连接
-- 接收 App 发来的命令（JSON 字符串）
-- 通过队列向 App 推送实时数据/事件
+- 采用按钮触发广播模式：用户点击"开始广播"后才启动蓝牙监听
+- 其它设备可以连接到树莓派进行串口通信
+- 树莓派物理地址: 2C:CF:67:F2:ED:B2
+- 连接成功后发送握手帧: {"isConnect":"OK"}
 """
 
 import socket
@@ -20,17 +16,19 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Optional, Callable
+from typing import Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 
 
 class BleServer(QThread):
-    """蓝牙 RFCOMM 服务器 - 在独立线程中运行"""
+    """蓝牙 RFCOMM 服务器 — 按钮触发广播模式"""
 
     client_connected = pyqtSignal(str)      # 参数: 客户端 MAC 地址
     client_disconnected = pyqtSignal()      # 客户端断开
     command_received = pyqtSignal(str)      # 收到 App 发来的 JSON 命令
     error_occurred = pyqtSignal(str)        # 错误信息
+    advertising_started = pyqtSignal()      # 广播已启动
+    advertising_stopped = pyqtSignal()      # 广播已停止
 
     def __init__(self, host_address: str = "2C:CF:67:F2:ED:B2", port: int = 1):
         super().__init__()
@@ -40,15 +38,14 @@ class BleServer(QThread):
         self.client_sock: Optional[socket.socket] = None
         self.client_addr: Optional[str] = None
         self._running = False
+        self._advertising = False
         self._send_queue = queue.Queue()
         self._lock = threading.Lock()
-        self.connected_at: float = 0.0  # 本次连接建立的时间戳
+        self.connected_at: float = 0.0
 
     @staticmethod
     def _setup_bluetooth(port: int = 1):
         """自动注册 SDP 服务并设置蓝牙可被发现/可连接"""
-        # 1. 尝试注册 RFCOMM 串口服务 (SPP)
-        # 先尝试不加 sudo，失败再加 sudo
         for cmd_prefix in ([], ["sudo"]):
             cmd = cmd_prefix + ["sdptool", "add", f"--channel={port}", "SP"]
             try:
@@ -56,27 +53,23 @@ class BleServer(QThread):
                     cmd, capture_output=True, text=True, timeout=5, check=False
                 )
                 if result.returncode == 0:
-                    print(f"[BleServer] SDP 服务注册成功: {' '.join(cmd)}")
+                    print(f"[BleServer] SDP 服务注册成功")
                     break
             except FileNotFoundError:
-                # sdptool 不存在，跳到 btmgmt fallback
                 break
-            except Exception as e:
-                print(f"[BleServer] SDP 注册尝试失败 ({' '.join(cmd)}): {e}")
+            except Exception:
+                pass
         else:
-            # 两个都失败了，尝试 btmgmt (新系统 fallback)
             try:
                 subprocess.run(
                     ["sudo", "btmgmt", "add-uuid", "1101", "/rfcomm0"],
                     capture_output=True, text=True, timeout=5, check=False
                 )
-                print("[BleServer] 尝试通过 btmgmt 注册 UUID")
             except FileNotFoundError:
                 pass
-            except Exception as e:
-                print(f"[BleServer] btmgmt 注册失败: {e}")
+            except Exception:
+                pass
 
-        # 2. 设置蓝牙可被发现、可连接
         for cmd_prefix in ([], ["sudo"]):
             cmd = cmd_prefix + ["hciconfig", "hci0", "piscan"]
             try:
@@ -87,7 +80,6 @@ class BleServer(QThread):
                     print(f"[BleServer] 蓝牙已设置为可发现/可连接")
                     break
                 else:
-                    # 可能是 hci0 down，尝试先 up
                     up_cmd = cmd_prefix + ["hciconfig", "hci0", "up"]
                     subprocess.run(up_cmd, capture_output=True, timeout=5, check=False)
                     result2 = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
@@ -96,13 +88,30 @@ class BleServer(QThread):
                         break
             except FileNotFoundError:
                 break
-            except Exception as e:
-                print(f"[BleServer] 设置蓝牙可发现失败: {e}")
+            except Exception:
+                pass
+
+    def start_advertising(self):
+        """开始蓝牙广播（由按钮触发）"""
+        if self._advertising or self._running:
+            return
+        self._advertising = True
+        self._running = True
+        self.start()
+        self.advertising_started.emit()
+        print("[BleServer] 蓝牙广播已启动")
+
+    def stop_advertising(self):
+        """停止蓝牙广播"""
+        self._advertising = False
+        self._running = False
+        self._cleanup()
+        self.advertising_stopped.emit()
+        print("[BleServer] 蓝牙广播已停止")
 
     def run(self):
         """主线程：监听连接 + 接收数据 + 发送数据"""
         self._setup_bluetooth(self.port)
-        self._running = True
         try:
             self.server_sock = socket.socket(
                 socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM
@@ -117,6 +126,8 @@ class BleServer(QThread):
                     client_sock, client_info = self.server_sock.accept()
                 except socket.timeout:
                     continue
+                except OSError:
+                    break
 
                 with self._lock:
                     self.client_sock = client_sock
@@ -126,10 +137,9 @@ class BleServer(QThread):
                 print(f"[BleServer] App 已连接: {self.client_addr}")
                 self.client_connected.emit(self.client_addr)
 
-                # 发送欢迎消息（JSON 格式）
-                self._send_raw(b"{\"event\":\"connected\",\"msg\":\"SMART RIDE ready\"}\r\n")
+                # xinjia.txt 握手帧
+                self._send_raw(b'{"isConnect":"OK"}\r\n')
 
-                # 进入与该客户端的通信循环
                 self._handle_client(client_sock)
 
                 with self._lock:
@@ -148,17 +158,15 @@ class BleServer(QThread):
 
     def _handle_client(self, sock: socket.socket):
         """处理单个客户端的连接生命周期"""
-        sock.settimeout(0.05)  # 非阻塞式接收，让发送有机会执行
+        sock.settimeout(0.05)
         buffer = b""
 
         while self._running:
-            # 1. 尝试接收数据
             try:
                 data = sock.recv(1024)
                 if not data:
                     break
                 buffer += data
-                # 按换行符分割处理多条命令
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
                     msg = line.decode("utf-8", errors="ignore").strip()
@@ -171,12 +179,10 @@ class BleServer(QThread):
                 print(f"[BleServer] 接收异常: {e}")
                 break
 
-            # 2. 尝试发送队列中的数据（非阻塞取）
             try:
                 payload = self._send_queue.get_nowait()
                 if isinstance(payload, str):
                     payload = payload.encode("utf-8")
-                # JSON 数据追加换行分隔符，二进制紧凑数据直接发送
                 if payload.startswith(b"{") and not payload.endswith(b"\r\n"):
                     payload += b"\r\n"
                 sock.sendall(payload)
@@ -212,6 +218,7 @@ class BleServer(QThread):
     def stop(self):
         """停止服务"""
         self._running = False
+        self._advertising = False
         self._cleanup()
         self.wait(2000)
 
@@ -236,14 +243,11 @@ if __name__ == "__main__":
     from PyQt5.QtCore import QCoreApplication
 
     app = QCoreApplication(sys.argv)
-
     server = BleServer()
     server.client_connected.connect(lambda addr: print(f"信号: 连接 {addr}"))
     server.client_disconnected.connect(lambda: print("信号: 断开"))
     server.command_received.connect(lambda cmd: print(f"信号: 命令 {cmd}"))
-
-    server.start()
-
+    server.start_advertising()
     try:
         sys.exit(app.exec_())
     except KeyboardInterrupt:

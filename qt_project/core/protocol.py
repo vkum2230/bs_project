@@ -30,18 +30,23 @@ class RideSessionState(Enum):
 
 
 class AppCommandType(Enum):
-    """App 发给树莓派的命令类型"""
+    """App 发给树莓派的命令类型（xinjia.txt 协议）"""
     START_RIDE = "start_ride"
     PAUSE_RIDE = "pause_ride"
     RESUME_RIDE = "resume_ride"
     STOP_RIDE = "stop_ride"
-    SET_TARGET = "set_target"          # 设置目标（功率/心率/导航点）
-    LOAD_ROUTE = "load_route"          # 加载 GPX 路线
-    REQUEST_HISTORY = "request_history" # 请求历史记录列表
-    REQUEST_FIT = "request_fit"         # 请求下载 FIT 文件
-    REQUEST_GPX = "request_gpx"         # 请求下载 GPX 文件
-    UPDATE_CONFIG = "update_config"     # 更新用户配置
-    PING = "ping"                       # 心跳/连接检测
+    SET_TARGET = "set_target"
+    LOAD_ROUTE = "load_route"
+    REQUEST_HISTORY = "request_history"
+    REQUEST_FIT = "request_fit"
+    REQUEST_GPX = "request_gpx"
+    UPDATE_CONFIG = "update_config"
+    PING = "ping"
+    # xinjia.txt 新增命令
+    SET_THRESHOLD = "set_threshold"
+    SET_ALERT_SWITCH = "set_alert_switch"
+    SET_NAV_DESTINATION = "set_nav_destination"
+    SET_RIDE_STATE = "set_ride_state"
 
 
 class AlertType(Enum):
