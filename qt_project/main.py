@@ -1305,7 +1305,7 @@ class BikeComputerPro(QWidget):
         # 播报连接成功（消息框 + 语音）
         if channel == "mqtt":
             self.connect = 1
-            self.add_voice_message("WiFi 连接成功", icon="📶")
+            self.add_voice_message("WiFi 连接成功", icon="🔊")
             if self.voice_player:
                 self.voice_player.speak("WiFi 连接成功", show_in_ui=False)
         elif channel == "ble":
