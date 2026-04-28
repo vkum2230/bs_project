@@ -1296,9 +1296,10 @@ class BikeComputerPro(QWidget):
 
     def _on_app_connected(self, channel: str):
         """App 已通过任一通道连接"""
-        # 先播放欢迎语音（如果还没播放），确保欢迎语音先于连接成功语音
+        # 先确保欢迎消息出现在消息框最上方（同步写入，避免语音异步导致顺序错乱）
         if not self._welcome_played:
             self._welcome_played = True
+            self.add_voice_message("你好，我是骑行小智", icon="🤖")
             self._play_welcome_voice()
 
         # 播报连接成功（消息框 + 语音）
