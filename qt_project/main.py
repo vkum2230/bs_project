@@ -1228,7 +1228,7 @@ class BikeComputerPro(QWidget):
                 QPushButton:pressed { background-color: #3A3A3A; }
             """)
         elif self.connect == 1:
-            self.connect_indicator.setText("📱 WiFi")
+            self.connect_indicator.setText("WiFi")
             self.connect_indicator.setStyleSheet("""
                 QPushButton {
                     color: #2ecc71;
@@ -1239,7 +1239,7 @@ class BikeComputerPro(QWidget):
                 QPushButton:pressed { background-color: #3A3A3A; }
             """)
         elif self.connect == 2:
-            self.connect_indicator.setText("📱 BLE")
+            self.connect_indicator.setText("BLE")
             self.connect_indicator.setStyleSheet("""
                 QPushButton {
                     color: #4DB8FF;

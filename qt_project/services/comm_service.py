@@ -342,11 +342,6 @@ class CommService(QObject):
         self.ble_server.command_received.connect(self._on_ble_command)
         self.ble_server.error_occurred.connect(lambda e: print(f"[CommService] BLE错误: {e}"))
 
-        # 定时器：1Hz 推送实时数据
-        self.push_timer = QTimer(self)
-        self.push_timer.timeout.connect(self._push_realtime_data)
-        self.push_timer.start(1000)
-
         # BLE 心跳定时器
         self._ble_heartbeat_timer = QTimer(self)
         self._ble_heartbeat_timer.timeout.connect(self._send_ble_heartbeat)
@@ -373,7 +368,6 @@ class CommService(QObject):
     def stop(self):
         """停止所有通信服务"""
         print("[CommService] 停止通信服务...")
-        self.push_timer.stop()
         self._ble_heartbeat_timer.stop()
         self.ble_server.stop()
         self.mqtt_bridge.stop()
@@ -385,7 +379,24 @@ class CommService(QObject):
     # --------------------------------------------------------------------------
 
     def on_sensor_data(self, sensor: SensorData):
-        self.data_buffer.push(sensor)
+        """收到串口数据立即推送（不再定时发，避免空数据）"""
+        if self._is_empty_data(sensor):
+            return
+        payload = self._build_realtime_payload_from_sensor(sensor)
+        self._send_realtime_payload(payload)
+
+    @staticmethod
+    def _is_empty_data(sensor: SensorData) -> bool:
+        """判断是否为全0空数据"""
+        return (
+            sensor.speed == 0.0
+            and sensor.cadence == 0.0
+            and sensor.power == 0.0
+            and sensor.heart_rate == 0.0
+            and sensor.slope == 0.0
+            and sensor.temperature == 0.0
+            and sensor.rear_dist == 0.0
+        )
 
     def set_ride_state(self, state: RideSessionState):
         old_state = self.ride_state
@@ -397,21 +408,17 @@ class CommService(QObject):
             })
 
     # --------------------------------------------------------------------------
-    # 定时推送逻辑
+    # 实时数据推送（收到即发）
     # --------------------------------------------------------------------------
 
-    def _push_realtime_data(self):
-        app_data = self.data_buffer.get_merged(self.ride_state)
-        self.data_pushed.emit(app_data)
+    def _send_realtime_payload(self, payload: dict):
+        """推送实时数据到所有可用通道"""
         now = time.time()
-        self.buffer_queue.push(app_data)
-
         pushed_count = 0
 
         # BLE
         if self.ble_server.has_connected_client():
             try:
-                payload = self._build_realtime_payload(app_data)
                 self.ble_server.notify(json.dumps(payload, ensure_ascii=False))
                 self.ble_last_push_time = now
                 pushed_count += 1
@@ -421,7 +428,6 @@ class CommService(QObject):
         # MQTT
         if self.mqtt_bridge.is_app_connected():
             try:
-                payload = self._build_realtime_payload(app_data)
                 self.mqtt_bridge.publish("deviceData", payload)
                 self.mqtt_last_push_time = now
                 pushed_count += 1
@@ -431,21 +437,21 @@ class CommService(QObject):
         if pushed_count == 0:
             print("[CommService] 所有通道断开，数据已缓存")
 
-    def _build_realtime_payload(self, app_data: AppRealtimeData) -> dict:
-        """构建 xinjia.txt 实时数据消息体"""
+    def _build_realtime_payload_from_sensor(self, sensor: SensorData) -> dict:
+        """从 SensorData 直接构建 xinjia.txt 实时数据消息体"""
         t = time.strftime("%H:%M:%S", time.localtime())
         return {
             "type": "realtime",
             "timestamp": t,
             "data": {
-                "speed": app_data.speed,
-                "cadence": app_data.cadence,
-                "power": app_data.power,
-                "heart_rate": app_data.heart_rate,
-                "slope": app_data.slope,
-                "temperature": app_data.temperature,
-                "rear_dist": app_data.rear_dist,
-                "gps": app_data.gps.to_dict() if app_data.gps else {"lat": 0.0, "lon": 0.0},
+                "speed": sensor.speed,
+                "cadence": sensor.cadence,
+                "power": sensor.power,
+                "heart_rate": sensor.heart_rate,
+                "slope": sensor.slope,
+                "temperature": sensor.temperature,
+                "rear_dist": sensor.rear_dist,
+                "gps": sensor.location.to_dict() if sensor.location else {"lat": 0.0, "lon": 0.0},
             }
         }
 
