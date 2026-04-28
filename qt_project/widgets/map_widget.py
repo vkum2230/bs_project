@@ -822,6 +822,8 @@ class MapWidget(QWidget):
         self._mode = mode  # 'online' 或 'offline'
         self.current_lat = None
         self.current_lon = None
+        self._dest_lat = None
+        self._dest_lon = None
         self.is_navigating = False  # 是否正在导航
         self._map_html_loaded = False  # HTML 页面是否已成功加载
         self._skip_next_map_loaded = False  # 切换模式时跳过地图加载播报
@@ -4243,6 +4245,8 @@ class MapWidget(QWidget):
             self._last_nav_instruction = ""
             self._last_rel_dir = ""
             self.is_navigating = True
+            self._dest_lat = dest_lat
+            self._dest_lon = dest_lon
 
             # Python 直接发送 JS 绘制正确路线 + 显示面板 + zoom=16
             # 不依赖 JS 全局变量 offlineRouteShape
@@ -4325,6 +4329,8 @@ class MapWidget(QWidget):
             """
             self.web_view.page().runJavaScript(js_code)
             self.is_navigating = True
+            self._dest_lat = dest_lat
+            self._dest_lon = dest_lon
             return True
 
     def _on_route_planned(self, route):

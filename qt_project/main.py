@@ -1562,8 +1562,23 @@ class BikeComputerPro(QWidget):
         #     self.voice_player.speak(status)
 
     def on_nav_started(self):
-        """导航开始回调——总览播报已在 on_nav_overview 中处理，此处不再重复播报"""
-        print("[Main] 导航开始（总览播报由 on_nav_overview 统一处理）")
+        """导航开始回调——发送导航目的地到 App，并播报总览"""
+        print("[Main] 导航开始")
+        # 发送导航目的地到 MQTT/BLE
+        dest_lat, dest_lon = self.page_map.get_navigation_destination()
+        if dest_lat is not None and dest_lon is not None:
+            payload = {
+                "type": "nav_destination",
+                "timestamp": time.strftime("%H:%M:%S"),
+                "data": {
+                    "gps": {"lat": dest_lat, "lon": dest_lon}
+                }
+            }
+            if self.comm_service.mqtt_bridge.is_app_connected():
+                self.comm_service.mqtt_bridge.publish("delayData", payload)
+            if self.comm_service.ble_server.has_connected_client():
+                self.comm_service.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+            print(f"[Main] 导航目的地已发送: ({dest_lat}, {dest_lon})")
 
     def on_nav_stopped(self):
         """导航结束回调——只语音播报，UI 由 voice player 回调统一显示"""
@@ -1575,8 +1590,21 @@ class BikeComputerPro(QWidget):
                 print(f"[Voice] 导航结束播报失败: {e}")
     
     def on_nav_instruction_v2(self, instruction: str, detail: str):
-        """导航指令回调 V2（带详细信息）——只语音播报，UI 由 voice player 回调统一显示"""
+        """导航指令回调 V2（带详细信息）——语音播报 + 检测偏航发送 App"""
         print(f"[Main] 导航指令: {instruction} | {detail}")
+
+        # 检测偏航并发送偏航提醒到 App
+        if "偏离路线" in instruction or "off_route" in instruction.lower():
+            payload = {
+                "type": "off_route",
+                "timestamp": time.strftime("%H:%M:%S"),
+                "data": {"crab": 1}
+            }
+            if self.comm_service.mqtt_bridge.is_app_connected():
+                self.comm_service.mqtt_bridge.publish("delayData", payload)
+            if self.comm_service.ble_server.has_connected_client():
+                self.comm_service.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+            print("[Main] 偏航提醒已发送")
 
         if self.voice_player:
             try:
