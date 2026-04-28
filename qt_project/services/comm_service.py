@@ -464,8 +464,17 @@ class CommService(QObject):
             return AlertType.REAR_VEHICLE
 
     def send_alert(self, alert_type, message: str, level: str = "warning"):
-        from core.protocol import build_alert_payload
-        payload = build_alert_payload(alert_type, message, level)
+        """推送告警事件（alert_type 可以是 AlertType 枚举或字符串）"""
+        if isinstance(alert_type, str):
+            payload = {
+                "type": alert_type,
+                "message": message,
+                "level": level,
+                "timestamp": time.time(),
+            }
+        else:
+            from core.protocol import build_alert_payload
+            payload = build_alert_payload(alert_type, message, level)
         self._push_event("alert", payload)
 
     def _push_event(self, event_type: str, payload: dict):

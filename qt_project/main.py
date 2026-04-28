@@ -1802,13 +1802,13 @@ class BikeComputerPro(QWidget):
             print(f"[Main] 未处理的命令: {cmd.cmd_type.value}")
 
     def on_comm_event(self, event_type, payload):
-        """处理通信服务推送的事件（如告警）"""
-        msg = payload.get("message", "")
-        if event_type == "alert" and msg:
-            self.add_voice_message(msg, icon="⚠️")
-            if self.voice_player:
-                level = payload.get("level", "warning")
-                self.voice_player.speak(msg)
+        """处理通信服务推送的事件（如告警）
+        
+        注意：消息框输出和语音播报统一由 _on_alert_triggered 处理，
+        这里只做其他事件的联动（如需要），避免重复输出。
+        """
+        # 告警的消息框+语音已由 _on_alert_triggered 统一处理，此处不再重复
+        pass
 
     def _on_alert_triggered(self, alert_type: str, message: str, level: str):
         """处理 AlertService 触发的告警"""
