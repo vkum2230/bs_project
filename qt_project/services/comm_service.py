@@ -88,9 +88,6 @@ class MqttBridge:
             "appData": "appData_1",
         }
 
-        # 心跳定时器
-        self._heartbeat_timer = None
-
     def start(self):
         try:
             import paho.mqtt.client as mqtt
@@ -122,9 +119,6 @@ class MqttBridge:
             print(f"[MqttBridge] 启动失败: {e}")
 
     def stop(self):
-        if self._heartbeat_timer:
-            self._heartbeat_timer.stop()
-            self._heartbeat_timer = None
         if self._client:
             try:
                 self._client.loop_stop()
@@ -152,31 +146,6 @@ class MqttBridge:
         except Exception as e:
             print(f"[MqttBridge] 发布失败 [{topic}]: {e}")
 
-    def _start_heartbeat(self):
-        """启动每5秒心跳（仅在 App 已握手连接后调用）"""
-        if self._heartbeat_timer:
-            return
-        self._heartbeat_timer = QTimer()
-        self._heartbeat_timer.timeout.connect(self._send_heartbeat)
-        self._heartbeat_timer.start(5000)
-        self._send_heartbeat()  # 立即发一次
-        print("[MqttBridge] 心跳定时器已启动")
-
-    def _stop_heartbeat(self):
-        """停止心跳定时器"""
-        if self._heartbeat_timer:
-            self._heartbeat_timer.stop()
-            self._heartbeat_timer = None
-            print("[MqttBridge] 心跳定时器已停止")
-
-    def _send_heartbeat(self):
-        """发送设备心跳（仅在 App 已握手连接时发送）"""
-        if not self._connected or not self._app_connected:
-            return
-        payload = {"isConnect": "continue"}
-        self.publish("deviceHeart", payload)
-        print("[MqttBridge] 心跳已发送")
-
     def _on_connect(self, client, userdata, flags, rc, *args):
         rc_val = getattr(rc, "value", rc) if hasattr(rc, "value") else rc
         if rc == 0:
@@ -188,7 +157,7 @@ class MqttBridge:
                 print(f"[MqttBridge] 已订阅: {self._topics['appHeart']}, {self._topics['appData']}")
             except Exception as e:
                 print(f"[MqttBridge] 订阅失败: {e}")
-            # 注意：心跳不在此处启动，等 App 握手成功后再启动
+            # 注意：心跳由 CommService 管理，不在此处启动
             if self.on_connected:
                 try:
                     self.on_connected()
@@ -200,7 +169,6 @@ class MqttBridge:
     def _on_disconnect(self, client, userdata, disconnect_flags, rc, properties=None):
         self._connected = False
         self._app_connected = False
-        self._stop_heartbeat()
         rc_val = getattr(rc, "value", rc) if hasattr(rc, "value") else rc
         print(f"[MqttBridge] MQTT 已断开 (rc={rc_val})")
         if self.on_disconnected:
@@ -226,7 +194,7 @@ class MqttBridge:
                         self._app_connected = True
                         self.publish("deviceHeart", {"isConnect": "OK"})
                         print("[MqttBridge] App 已连接（握手成功）")
-                        self._start_heartbeat()  # App 握手成功后启动心跳
+                        # 心跳由 CommService 通过 app_connected 信号管理
                         if self.on_app_connect:
                             self.on_app_connect()
                 except Exception as e:
@@ -245,9 +213,8 @@ class MqttBridge:
         return self._app_connected
 
     def disconnect_app(self):
-        """主动断开 App 连接"""
+        """主动断开 App 连接（心跳由 CommService 停止）"""
         self._app_connected = False
-        self._stop_heartbeat()
         self.publish("deviceHeart", {"isConnect": "OK"})
         print("[MqttBridge] 已发送断开通知")
 
@@ -354,6 +321,14 @@ class CommService(QObject):
         self._ble_heartbeat_timer = QTimer(self)
         self._ble_heartbeat_timer.timeout.connect(self._send_ble_heartbeat)
 
+        # MQTT 心跳定时器（放在 CommService 中确保在主线程创建）
+        self._mqtt_heartbeat_timer = QTimer(self)
+        self._mqtt_heartbeat_timer.timeout.connect(self._send_mqtt_heartbeat)
+
+        # app_connected 信号在主线程触发，安全启动心跳
+        self.app_connected.connect(self._on_app_connected_for_heartbeat)
+        self.app_disconnected.connect(self._on_app_disconnected_for_heartbeat)
+
         self._servers_started = False
         self._ble_started = False
 
@@ -377,6 +352,7 @@ class CommService(QObject):
         """停止所有通信服务"""
         print("[CommService] 停止通信服务...")
         self._ble_heartbeat_timer.stop()
+        self._mqtt_heartbeat_timer.stop()
         self.ble_server.stop()
         self.mqtt_bridge.stop()
         self._servers_started = False
@@ -694,3 +670,25 @@ class CommService(QObject):
             except Exception:
                 pass
             self.app_disconnected.emit("ble")
+
+    def _on_app_connected_for_heartbeat(self, channel: str):
+        """App 连接成功后启动对应通道的心跳（在主线程执行）"""
+        if channel == "mqtt" and not self._mqtt_heartbeat_timer.isActive():
+            self._mqtt_heartbeat_timer.start(5000)
+            self._send_mqtt_heartbeat()
+            print("[CommService] MQTT 心跳已启动")
+
+    def _on_app_disconnected_for_heartbeat(self, channel: str):
+        """App 断开后停止对应通道的心跳"""
+        if channel == "mqtt" and self._mqtt_heartbeat_timer.isActive():
+            self._mqtt_heartbeat_timer.stop()
+            print("[CommService] MQTT 心跳已停止")
+
+    def _send_mqtt_heartbeat(self):
+        """发送 MQTT 心跳（每5秒由定时器触发）"""
+        if self.mqtt_bridge.is_app_connected():
+            self.mqtt_bridge.publish("deviceHeart", {"isConnect": "continue"})
+            print("[CommService] MQTT 心跳已发送")
+        else:
+            self._mqtt_heartbeat_timer.stop()
+            print("[CommService] MQTT App 已断开，停止心跳")
