@@ -1717,7 +1717,7 @@ class BikeComputerPro(QWidget):
         try:
             # 混合播放器自动选择：网络好->Edge-TTS，无网络->Piper离线
             print("[Voice] 开始播报: '你好，我是骑行小智'...")
-            result = self.voice_player.speak("你好，我是骑行小智", block=False)
+            result = self.voice_player.speak("你好，我是骑行小智", block=False, show_in_ui=False)
             print(f"[Voice] 播报调用返回: {'成功' if result else '失败'}")
             
             if not result:
