@@ -1296,12 +1296,22 @@ class BikeComputerPro(QWidget):
 
     def _on_app_connected(self, channel: str):
         """App 已通过任一通道连接"""
+        # 先播放欢迎语音（如果还没播放），确保欢迎语音先于连接成功语音
+        if not self._welcome_played:
+            self._welcome_played = True
+            self._play_welcome_voice()
+
+        # 播报连接成功（消息框 + 语音）
         if channel == "mqtt":
             self.connect = 1
             self.add_voice_message("WiFi 连接成功", icon="📶")
+            if self.voice_player:
+                self.voice_player.speak("WiFi 连接成功", show_in_ui=False)
         elif channel == "ble":
             self.connect = 2
             self.add_voice_message("蓝牙连接成功", icon="🔵")
+            if self.voice_player:
+                self.voice_player.speak("蓝牙连接成功", show_in_ui=False)
         self._update_connect_indicator()
         # 自动跳转到数据界面（如果当前在连接页面）
         if self.stacked_widget.currentIndex() == 0:
@@ -1812,12 +1822,12 @@ class BikeComputerPro(QWidget):
 
     def _on_alert_triggered(self, alert_type: str, message: str, level: str):
         """处理 AlertService 触发的告警"""
-        # UI 消息
+        # UI 消息（只写一次，语音播放器内部不再重复添加）
         self.add_voice_message(message, icon="⚠️")
 
-        # 语音播报
+        # 语音播报（show_in_ui=False 避免消息框重复输出）
         if self.voice_player:
-            self.voice_player.speak(message)
+            self.voice_player.speak(message, show_in_ui=False)
 
         # LED 闪灯：critical 红灯闪烁，warning 黄灯闪烁，其他蓝灯闪烁
         if self.led_controller:
