@@ -153,17 +153,25 @@ class MqttBridge:
             print(f"[MqttBridge] 发布失败 [{topic}]: {e}")
 
     def _start_heartbeat(self):
-        """启动每5秒心跳"""
+        """启动每5秒心跳（仅在 App 已握手连接后调用）"""
         if self._heartbeat_timer:
             return
         self._heartbeat_timer = QTimer()
         self._heartbeat_timer.timeout.connect(self._send_heartbeat)
         self._heartbeat_timer.start(5000)
         self._send_heartbeat()  # 立即发一次
+        print("[MqttBridge] 心跳定时器已启动")
+
+    def _stop_heartbeat(self):
+        """停止心跳定时器"""
+        if self._heartbeat_timer:
+            self._heartbeat_timer.stop()
+            self._heartbeat_timer = None
+            print("[MqttBridge] 心跳定时器已停止")
 
     def _send_heartbeat(self):
-        """发送设备心跳"""
-        if not self._connected:
+        """发送设备心跳（仅在 App 已握手连接时发送）"""
+        if not self._connected or not self._app_connected:
             return
         payload = {"isConnect": "continue"}
         self.publish("deviceHeart", payload)
@@ -180,7 +188,7 @@ class MqttBridge:
                 print(f"[MqttBridge] 已订阅: {self._topics['appHeart']}, {self._topics['appData']}")
             except Exception as e:
                 print(f"[MqttBridge] 订阅失败: {e}")
-            self._start_heartbeat()
+            # 注意：心跳不在此处启动，等 App 握手成功后再启动
             if self.on_connected:
                 try:
                     self.on_connected()
@@ -192,11 +200,9 @@ class MqttBridge:
     def _on_disconnect(self, client, userdata, disconnect_flags, rc, properties=None):
         self._connected = False
         self._app_connected = False
+        self._stop_heartbeat()
         rc_val = getattr(rc, "value", rc) if hasattr(rc, "value") else rc
         print(f"[MqttBridge] MQTT 已断开 (rc={rc_val})")
-        if self._heartbeat_timer:
-            self._heartbeat_timer.stop()
-            self._heartbeat_timer = None
         if self.on_disconnected:
             try:
                 self.on_disconnected()
@@ -220,6 +226,7 @@ class MqttBridge:
                         self._app_connected = True
                         self.publish("deviceHeart", {"isConnect": "OK"})
                         print("[MqttBridge] App 已连接（握手成功）")
+                        self._start_heartbeat()  # App 握手成功后启动心跳
                         if self.on_app_connect:
                             self.on_app_connect()
                 except Exception as e:
@@ -240,6 +247,7 @@ class MqttBridge:
     def disconnect_app(self):
         """主动断开 App 连接"""
         self._app_connected = False
+        self._stop_heartbeat()
         self.publish("deviceHeart", {"isConnect": "OK"})
         print("[MqttBridge] 已发送断开通知")
 
