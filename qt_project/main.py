@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import os
+# 必须在导入 PyQt5 之前设置，否则 DPI 缩放禁用无效
+os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+os.environ["QT_SCALE_FACTOR"] = "1"
+os.environ["QT_WAYLAND_FORCE_DPI"] = "96"
+os.environ["QT_FONT_DPI"] = "96"
+
 import sys
 import socket
-import os
 import serial
 import json
 import math
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout,
                              QHBoxLayout, QFrame, QPushButton, QStackedWidget,
                              QGridLayout, QSizePolicy, QWidget, QScrollArea, QTextEdit)
-from PyQt5.QtCore import QTimer, QDateTime, Qt
+from PyQt5.QtCore import QTimer, QDateTime, Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor
-
-os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
 
 from drivers.serial_handler import SerialReader
 from core.location_service import LocationService
@@ -21,6 +26,7 @@ from widgets.circle_gauge import CircleGauge
 from widgets.metric_card import MetricCard
 from ui.history_page import HistoryPage
 from ui.settings_page import SettingsPage
+from ui.connect_page import ConnectPage
 from utils.serial_debugger import SerialDebugger
 from drivers.audio import VoicePlayer, LEDController
 from drivers.audio.voice_recorder import ButtonVoiceAssistant
@@ -37,8 +43,12 @@ from utils.tile_server import get_tile_server
 
 
 class BikeComputerPro(QWidget):
+    _voice_msg_signal = pyqtSignal(str, str)
+
     def __init__(self):
         super().__init__()
+        # 线程安全消息信号（确保 QTextEdit 只在主线程修改）
+        self._voice_msg_signal.connect(self._do_add_voice_message)
 
         # ========== 配置管理器初始化 ==========
         self.config = get_config()
@@ -289,15 +299,19 @@ class BikeComputerPro(QWidget):
         self.current_province = None
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # 禁用 WA_TranslucentBackground，避免窗口背景透明透出桌面
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.geometry()
+            print(f"[Main] 屏幕分辨率: {geo.width()}x{geo.height()}")
         self.showFullScreen()
         self.raise_()           
         self.activateWindow()   
         self.setFocus()         
         
-        screen = QApplication.primaryScreen()
         if screen:
             QCursor.setPos(screen.geometry().center())
         self.setCursor(Qt.BlankCursor) 
@@ -317,7 +331,7 @@ class BikeComputerPro(QWidget):
 
         # ==================== 状态栏 ====================
         self.status_bar = QWidget()
-        self.status_bar.setFixedHeight(60)
+        self.status_bar.setFixedHeight(50)
         self.status_layout = QHBoxLayout(self.status_bar)
         self.status_layout.setContentsMargins(15, 3, 15, 3)
         self.status_layout.setSpacing(0)
@@ -743,30 +757,38 @@ class BikeComputerPro(QWidget):
         scroll_settings.setStyleSheet("background-color: transparent; border: none;")
         scroll_settings.setWidget(self.page_settings)
 
+        # --- 连接页面（首屏） ---
+        self.page_connect = ConnectPage(parent=self)
+        self.page_connect.skip_clicked.connect(self._enter_data_page)
+
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.setMinimumHeight(0)
         sp = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.stacked_widget.setSizePolicy(sp)
+        self.stacked_widget.addWidget(self.page_connect)
         self.stacked_widget.addWidget(self.page_data)
         self.stacked_widget.addWidget(self.page_map)
         self.stacked_widget.addWidget(self.page_history)
         self.stacked_widget.addWidget(scroll_settings)
 
         # --- 消息框（固定 3 行消息高度，不被任何页面内容挤压） ---
-        self.dialog_container = QWidget()
+        self.dialog_container = QWidget(parent=self)
+        self.dialog_container.setObjectName("dialog_container")
         self.dialog_container.setMinimumHeight(104)
         self.dialog_container.setMaximumHeight(104)
-        self.dialog_container.setStyleSheet("background: transparent;")
+        # 用 ID 选择器确保优先级高于全局 QWidget 样式表
+        self.dialog_container.setStyleSheet("#dialog_container { background-color: transparent; }")
 
         dialog_layout = QVBoxLayout(self.dialog_container)
         dialog_layout.setContentsMargins(10, 4, 10, 4)
         dialog_layout.setSpacing(0)
 
         self.dialog_box = QFrame()
+        self.dialog_box.setObjectName("dialog_box")
         self.dialog_box.setMinimumHeight(86)
         self.dialog_box.setMaximumHeight(86)
         self.dialog_box.setStyleSheet("""
-            QFrame {
+            #dialog_box {
                 background-color: #333333;
                 border-radius: 10px;
                 border: 1px solid #4A4A4A;
@@ -810,15 +832,21 @@ class BikeComputerPro(QWidget):
 
         dialog_layout.addWidget(self.dialog_box)
 
-        # 组装：stacked_widget 扩张填充，dialog_container 固定不动
+        # 组装：stacked_widget 占据 content_container 全部空间
         self.content_layout.addWidget(self.stacked_widget, 1)
-        self.content_layout.addWidget(self.dialog_container, 0)
 
-        # 最终组装
+        # 最终组装（消息框放在 main_layout 底部，成为布局的一部分，
+        # 各页面内容会自动收缩，不会被覆盖）
         self.main_layout.addWidget(self.status_bar)
         self.main_layout.addWidget(self.line)
         self.main_layout.addWidget(self.content_container, 1)
+        self.main_layout.addWidget(self.dialog_container, 0)
         self.setLayout(self.main_layout)
+
+        # 初始状态：连接页面，隐藏状态栏、分割线和消息框
+        self.status_bar.hide()
+        self.line.hide()
+        self.dialog_container.hide()
 
         # 定时器
         self.timer = QTimer(self)
@@ -832,11 +860,7 @@ class BikeComputerPro(QWidget):
 
         self.update_info()
 
-        # ========== 启动语音播报 ==========
-        # 延迟 3 秒后播报欢迎语（给语音播放器初始化时间）
-        self.voice_timer = QTimer(self)
-        self.voice_timer.singleShot(3000, self._play_welcome_voice)
-        # ==================================
+        # 欢迎语音改为进入数据页面时播报（见 _enter_data_page）
 
         # 启动后 5 秒进行网络检测，无网则自动切离线
         QTimer.singleShot(5000, self._verify_startup_network)
@@ -989,8 +1013,28 @@ class BikeComputerPro(QWidget):
             traceback.print_exc()
             return None
 
+    def _enter_data_page(self):
+        """从连接页进入数据页（跳过连接或连接成功时调用）"""
+        self.status_bar.show()
+        self.line.show()
+        # 先切换到数据页，让 stacked_widget 占满 content_container
+        self.stacked_widget.setCurrentIndex(1)
+        # 强制限制内容区高度，防止 Wayland 逻辑高度>物理高度时底部被挤出屏幕
+        self.content_container.setMaximumHeight(445)
+        # 显示消息框（作为布局一部分，自动贴底）
+        self.dialog_container.show()
+        self.dialog_container.raise_()
+        self.btn_data.setStyleSheet(self.active_style)
+        self.btn_map.setStyleSheet(self.inactive_style)
+        self.btn_history.setStyleSheet(self.inactive_style)
+        self.btn_settings.setStyleSheet(self.inactive_style)
+        # 进入数据页后播报欢迎语音
+        self._play_welcome_voice()
+
     def show_data_page(self):
-        self.stacked_widget.setCurrentIndex(0)
+        self.stacked_widget.setCurrentIndex(1)
+        self.content_container.setMaximumHeight(445)
+        self.dialog_container.show()
         self.btn_data.setStyleSheet(self.active_style)
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.inactive_style)
@@ -999,7 +1043,9 @@ class BikeComputerPro(QWidget):
     def show_map_page(self):
         is_first_visit = not self._map_page_visited
         self._map_page_visited = True
-        self.stacked_widget.setCurrentIndex(1)
+        self.stacked_widget.setCurrentIndex(2)
+        self.content_container.setMaximumHeight(445)
+        self.dialog_container.show()
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.active_style)
         self.btn_history.setStyleSheet(self.inactive_style)
@@ -1009,7 +1055,9 @@ class BikeComputerPro(QWidget):
             self.on_map_loaded(True)
 
     def show_history_page(self):
-        self.stacked_widget.setCurrentIndex(2)
+        self.stacked_widget.setCurrentIndex(3)
+        self.content_container.setMaximumHeight(445)
+        self.dialog_container.show()
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.active_style)
@@ -1017,7 +1065,9 @@ class BikeComputerPro(QWidget):
         self.page_history.refresh_list()
 
     def show_settings_page(self):
-        self.stacked_widget.setCurrentIndex(3)
+        self.stacked_widget.setCurrentIndex(4)
+        self.content_container.setMaximumHeight(445)
+        self.dialog_container.show()
         self.btn_data.setStyleSheet(self.inactive_style)
         self.btn_map.setStyleSheet(self.inactive_style)
         self.btn_history.setStyleSheet(self.inactive_style)
@@ -1463,14 +1513,12 @@ class BikeComputerPro(QWidget):
         scrollbar.setValue(scrollbar.maximum())
 
     def add_voice_message(self, text: str, icon: str = "🔊"):
-        """
-        添加语音消息到消息框（QTextEdit，带滚动条，自动滚动到底部）
+        """线程安全接口：从任意线程调用，自动排队到主线程更新消息框"""
+        self._voice_msg_signal.emit(text, icon)
 
-        Args:
-            text: 消息内容
-            icon: 消息图标，特殊值：
-                - __STREAM_UPDATE__: 流式更新（同一行覆盖）
-                - __STREAM_FINAL__: 流式完成（同一行显示最终结果）
+    def _do_add_voice_message(self, text: str, icon: str = "🔊"):
+        """
+        实际的消息处理（通过信号确保一定在主线程执行）
         """
         # 限制单条消息长度，防止超出界面
         max_length = 500

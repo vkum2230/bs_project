@@ -1,7 +1,11 @@
 python3 ./main.py 
 [Main] 配置加载完成，心率上限: 180
 已加载 34 个省级行政区（边界框模式）
-[FinalVoice] Edge-TTS 就绪，使用语音: zh-CN-XiaoxiaoNeural
+[TileServer] 瓦片服务器已启动: http://localhost:8766
+[TileServer] 瓦片根目录: /home/hedya/Desktop/bs_project/qt_project/maps/xiangtan_tiles
+[Main] 瓦片服务器 URL: http://localhost:8766/{z}/{x}/{y}.png
+[FinalVoice] 阿里云 TTS 就绪，模型: qwen3-tts-flash, 音色: Maia
+[FinalVoice] 系统音量已调至 85%
 [HybridVoice] 在线播放器 (Edge-TTS) 已加载
 [PiperVoice] 找到 Piper: /home/hedya/.local/share/piper/piper/piper
 [PiperVoice] 使用模型: /home/hedya/.local/share/piper/zh_CN/zh_CN-huayan-medium.onnx
@@ -10,6 +14,15 @@ python3 ./main.py
 [HybridVoice] 离线播放器已加载
 [Main] 混合语音播放器初始化成功（支持离线）
 [Main] LED 控制器初始化成功
+[Volume] ✓ amixer -c 2 set PCM 85% unmute
+[Volume] ✗ amixer -c 2 set Headphone 85% unmute — amixer: Unable to find simple control 'Headphone',0
+[Volume] ✗ amixer -c 2 set Speaker 85% unmute — amixer: Unable to find simple control 'Speaker',0
+[Volume] ✗ amixer -c 2 set Digital 85% unmute — amixer: Unable to find simple control 'Digital',0
+[Volume] ✗ amixer set Master 85% unmute — amixer: Unable to find simple control 'Master',0
+[Volume] ✓ amixer set PCM 85% unmute
+[Volume] ✗ amixer set Headphone 85% unmute — amixer: Unable to find simple control 'Headphone',0
+[Volume] 系统音量已设置为 85%
+[Main] 已恢复上次音量设置: 85%
 [Ollama] 正在检查 Ollama 服务...
 [Ollama] 服务已在运行
 [Ollama] 发现 1 个可用模型:
@@ -17,6 +30,8 @@ python3 ./main.py
 [Ollama] 选择模型: my-llama:latest
 [Ollama] 测试模型连接...
 [Ollama] 大模型连接成功！使用模型: my-llama:latest
+[Main] 百炼在线模型初始化成功（模型: qwen-turbo）
+[Main] 统一大模型客户端已初始化
 ALSA lib pcm_asym.c:105:(_snd_pcm_asym_open) capture slave is not defined
 ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.front
 ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.rear
@@ -77,7 +92,7 @@ LOG (VoskAPI:ReadDataFiles():model.cc:308) Loading winfo ./vosk-model-small-cn-0
 [ButtonHandler] 按钮监控已启动 (GPIO 17)
 [ButtonVoiceAssistant] 按钮监听已启动 (GPIO 17)
 [ButtonVoiceAssistant] 语音队列线程已启动
-[Main] 按钮语音助手初始化成功（已集成大模型）
+[Main] 按钮语音助手初始化成功（已集成统一大模型）
 [Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）
 [Main] 骑行记录仓库已初始化
 [CommService] 启动通信服务...
@@ -95,44 +110,38 @@ qt.qpa.wayland: Setting cursor position is not possible on wayland
 [SmartPinyinIME] 正在加载字库...
 [SmartPinyinIME] 加载完成: 1455汉字
 [PinyinHandler] 智能拼音输入法初始化成功
-成功打开串口: /dev/ttyAMA2
-[MqttBridge] MQTT 连接成功 (client_id=b'smartride-pi5-4704c4b3', rc=0)
+[MapWidget] 正在加载 高德骑行地图, base_url=file:///home/hedya/Desktop/bs_project/qt_project/, html_len=90266
+[MapWidget] 已加载 高德骑行地图
+[MqttBridge] MQTT 连接成功 (client_id=b'smartride-pi5-3e478361', rc=0)
 [MqttBridge] 已订阅命令主题: smartride/command
+成功打开串口: /dev/ttyAMA2
 [Map] ✅ 地图加载成功!
-[Main] ✅ 地图页面加载成功！
-[VoiceMessage] > 🗺️ 地图加载成功 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1207 on_map_loaded]
 [Voice] ========== 播放欢迎语音 ==========
 [Voice] 使用播放器: HybridVoicePlayer
 [Voice] 开始播报: '你好，我是骑行小智'...
 [HybridVoice] 开始播报: 你好，我是骑行小智...[Voice] 播报调用返回: 成功
 
 [Voice] LED 设置为常亮绿色
-[Voice] ========== 欢迎语音处理完成 ==========[HybridVoice] 网络状态: 可用
-
-[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/drivers/audio/piper_voice.py:296 _do_speak]
-[HybridVoice] 优先尝试 Edge-TTS 在线播报（35秒总超时）...
-[HybridVoice] Edge-TTS 线程启动...[HybridVoice] 等待 Edge-TTS 完成...
+[Voice] ========== 欢迎语音处理完成 ==========
+[HybridVoice] 网络状态: 可用
+[HybridVoice] 优先尝试阿里云 TTS 在线播报（60秒总超时）...[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1757 <module>]
+[HybridVoice] 阿里云 TTS 线程启动...
+[HybridVoice] 等待阿里云 TTS 完成...
 
 [FinalVoice] 播报: 你好，我是骑行小智
-[FinalVoice] Edge-TTS 尝试 1/2...
-[FinalVoice] Edge-TTS 失败 (尝试 1/2): ClientConnectorError: Cannot connect to host speech.platform.bing.com:443 ssl:<ssl.SSLContext object at 0x7ffed27b7800> [Connection reset by peer]
-[FinalVoice] Edge-TTS 尝试 2/2...
-[FinalVoice] Edge-TTS 失败 (尝试 2/2): ClientConnectorError: Cannot connect to host speech.platform.bing.com:443 ssl:<ssl.SSLContext object at 0x7ffed27b7800> [Connection reset by peer]
-[FinalVoice] Edge-TTS 失败
-[HybridVoice] Edge-TTS 线程完成，结果: False
-[HybridVoice] ✗ Edge-TTS 失败，结果: False
-[HybridVoice] Piper 状态: 可用
-[HybridVoice] 尝试 Piper 离线播报...
-[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/drivers/audio/offline_voice.py:71 speak]
-[OfflineVoice] 使用 Piper...
-[PiperVoice] 播报: 你好，我是骑行小智...
-[PiperVoice] 开始合成，模型: /home/hedya/.local/share/piper/zh_CN/zh_CN-huayan-medium.onnx
-[PiperVoice] 合成完成，开始播放...
-[PiperVoice] 播放完成
-[PiperVoice] 清理临时文件
-[OfflineVoice] Piper 成功
-[HybridVoice] ✓ Piper 离线播报成功
+[FinalVoice] 阿里云 TTS 尝试 1/2...
+[DEBUG] 调用前: dialog_container.visible=False, geo=PyQt5.QtCore.QRect(0, 0, 100, 104)
+[DEBUG] 调用后: dialog_container.visible=True, geo=PyQt5.QtCore.QRect(0, 695, 1024, 104)
+[DEBUG] dialog_container.parent=<__main__.BikeComputerPro object at 0x7fff5ac1a060>
+[DEBUG] dialog_box.visible=True, geo=PyQt5.QtCore.QRect(10, 9, 1004, 86)
+[DEBUG] dialog_msg.visible=True, geo=PyQt5.QtCore.QRect(11, 5, 982, 76)
+[FinalVoice] 流式合成完成
+[FinalVoice] ✓ aplay 播放成功
+[FinalVoice] ✓ 阿里云 TTS 播报成功
+[HybridVoice] 阿里云 TTS 线程完成，结果: True
+[HybridVoice] ✓ 阿里云 TTS 在线播报成功
 退出程序...
+[TileServer] 瓦片服务器已停止
 [CommService] 停止通信服务...
 [BleServer] 服务异常: [Errno 9] Bad file descriptor
 [MqttBridge] MQTT 已断开 (rc=0, flags=DisconnectFlags(is_disconnect_packet_from_server=False))

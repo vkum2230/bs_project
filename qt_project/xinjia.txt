@@ -1,0 +1,376 @@
+一、
+第一个界面：
+前端界面：连接手机方式，wifi（二维码扫码），蓝牙（按钮：按下其它设备可连接到本蓝牙，而不是像现在这样一直打开蓝牙等待别人连接）
+wifi：app端扫码往mqtt的appHeart_1主题发消息，消息体为{isConnect:"OK"}，我接收到消息mqtt往deviceHeart_1主题发送{isConnect:"OK"}，这时候表示已经连接到手机，跳转到数据界面
+蓝牙：按钮的形式打开蓝牙，其它设备可以连接到树莓派进行串口通信，树莓派的物理地址为：2C:CF:67:F2:ED:B2
+其中任意一个连接成功即可跳转到下一个界面
+之后持续每5s往deviceHeart_1主图发送一个消息为心跳，消息体为{isConnect:"continue"}
+用户也可以选择跳过连接，直接进入数据界面，在最上方的状态栏有一个标识符，如果未连接app，则显示连接字符，如果连接到了app，则是手机图标，长按图标可以主动断开与app端的连接，消息体为{isConnect:"OK"}点击连接则可以跳到第一界面再次选择连接到手机，这个也作为一个全局标志位，名为connect，wifi连接为1（只有mqtt发数，websocket暂时删除），蓝牙连接为2，否则为0
+这个标志位也决定了后续会往哪个通道发数据，如果是0就不发
+
+mqtt：
+实时数据（通过deviceData_1主题发送）：
+{
+  "type": "realtime",                  // 消息类型：实时数据
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "data": {                            // 数据体
+    "speed": 速度,                     // 速度：km/h
+    "cadence": 踏频,                   // 踏频：rpm
+    "power": 功率,                     // 功率：W
+    "heart_rate": 心率,                // 心率：bpm
+    "slope": 坡度,                     // 坡度：%
+    "temperature": 温度,               // 温度：℃
+    "rear_dist": 后方来车距离,         // 后方来车距离：m
+    "gps": {                           // GPS 坐标
+      "lat": 经度,                     // 纬度
+      "lon": 纬度                      // 经度
+    }
+  }
+}
+
+非实时数据（通过delayData_1主题发送）
+报警：
+{
+  "type": "event",                     // 消息类型：事件
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "event": "alert",                    // 事件名称：告警
+  "data": {                            // 事件数据体
+    "alert_type": "rear_vehicle",      // 告警类型
+    "message": "后方来车，距离 3.2 米", // 告警提示文本
+  }
+}
+rear_vehicle	后方来车告警
+heart_rate	心率异常告警
+fatigue	疲劳提醒
+fall	姿态异常 / 摔车检测
+
+
+骑行状态：
+{
+  "type": "event",                     // 消息类型：事件
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "event": "ride_state_changed",       // 事件名称：骑行状态变更
+  "data": {                            // 事件数据体
+    "old": "idle",                     // 原状态：idle/riding/paused/finished
+    "new": "riding"                    // 新状态：idle/riding/paused/finished
+  }
+}
+
+
+导航目的地并开始导航：
+{
+  "type": "nav_destination",           // 消息类型：导航目的地
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "data": {                            // 数据体
+    "gps": {                           // GPS 坐标
+      "lat": 经度,                     // 纬度
+      "lon": 纬度                      // 经度
+    }
+  }
+}
+
+偏航提醒需重新规划路线并导航：
+{
+  "type": "off_route",                 // 消息类型：偏航提醒
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "data": {                            // 数据体
+    "crab": 1                          // 偏航标志：1=已偏航
+  }
+}
+
+请求的fit和gpx文件：
+{
+  "type": "file_response",             // 消息类型：文件响应
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "file_type": "fit",                  // 文件类型：fit/gpx
+  "ride_id": "ride_20260424_143052",   // 记录唯一 ID
+  "filename": "ride_20260424_143052.fit", // 文件名
+  "size": 15360,                       // 文件大小：字节
+  "data": "base64编码的文件内容..."     // 文件内容：base64 编码
+}
+
+点击结束骑行后发送（也就是历史界面骑行详细）：
+{
+  "type": "history",                   // 消息类型：历史详情
+  "timestamp": 时:分:秒,               // 时间戳：时:分:秒
+  "data": {                            // 数据体
+    "id": "ride_xxx",                  // 记录唯一 ID
+    "start_time": 时:分:秒,            // 开始时间：时:分:秒
+    "total_distance": 骑行距离,        // 骑行距离：km
+    "total_time": 时:分:秒,            // 总时长：时:分:秒
+    "moving_time": 时:分:秒,           // 移动时长：时:分:秒
+    "avg_speed": 平均速度,             // 平均速度：km/h
+    "max_speed": 最大速度,             // 最大速度：km/h
+    "avg_power": 平均功率,             // 平均功率：W
+    "max_power": 最大功率,             // 最大功率：W
+    "avg_hr": 平均心率,                // 平均心率：bpm
+    "max_hr": 最大心率,                // 最大心率：bpm
+    "max_elevation_gain": 最大爬升高度, // 最大爬升高度：m
+    "calories": 消耗热量              // 消耗热量：kcal
+  }
+}
+
+
+
+app端发送给数莓派的数据(通过appData_1发送)
+阈值：
+{
+  "cmd": "set_threshold",              // 命令：设置阈值
+  "payload": {                           // 参数体
+    "heart_rate_max": 心率最大值,        // 心率最大值：bpm
+    "heart_rate_min": 心率最小值,        // 心率最小值：bpm
+    "rear_dist_alert": 后方来车阈值,     // 后方来车阈值：m
+    "weight": 体重                       // 体重：kg
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+
+告警开关：
+{
+  "cmd": "set_alert_switch",           // 命令：设置告警开关
+  "payload": {                           // 参数体
+    "alert": "rear_vehicle",           // 告警名称：rear_vehicle/heart_rate/fatigue/fall
+    "enabled": true                     // 开关状态：true=开 false=关
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+alert：
+rear_vehicle：后方来车告警
+heart_rate：心率异常告警
+fatigue：疲劳驾驶告警
+fall：跌倒告警
+enabled：true=开 false=关
+
+请求fit文件：
+{
+  "cmd": "request_fit",                // 命令：请求 FIT 文件
+  "payload": {                           // 参数体
+    "ride_id": "ride_20260424_143052"  // 记录唯一 ID
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+
+请求gpx文件：
+{
+  "cmd": "request_gpx",                // 命令：请求 GPX 文件
+  "payload": {                           // 参数体
+    "ride_id": "ride_20260424_143052"  // 记录唯一 ID
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+
+发送目的地并导航：
+{
+  "cmd": "set_nav_destination",        // 命令：设置导航目的地
+  "payload": {                           // 参数体
+    "gps": {                             // GPS 坐标
+      "lat": 经度,                     // 纬度
+      "lon": 纬度                      // 经度
+    },
+    "name": "名称"                     // 目的地名称
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+
+骑行状态：
+{
+  "cmd": "set_ride_state",             // 命令：设置骑行状态
+  "payload": {                           // 参数体
+    "ride_state": 1-4                   // 骑行状态：1=骑行中 2=骑行暂停 3=骑行恢复 4=结束骑行
+  },
+  "timestamp": 时:分:秒                // 时间戳：时:分:秒
+}
+
+1：骑行中
+2：骑行暂停
+3：骑行恢复
+4：结束骑行
+
+蓝牙：
+1. 实时数据（每秒 1 次）
+
+{
+  "type": "realtime",                    // 消息类型：实时数据
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "data": {                              // 数据体
+    "speed": 25.4,                       // 速度：km/h
+    "cadence": 90,                       // 踏频：rpm
+    "power": 220,                        // 功率：W
+    "heart_rate": 145,                   // 心率：bpm
+    "slope": 3.5,                        // 坡度：%
+    "temperature": 26.5,                 // 温度：℃
+    "rear_dist": 12.5,                   // 后方来车距离：m
+    "gps": {                             // GPS 坐标
+      "lat": 31.230416,                  // 纬度
+      "lon": 121.473701                  // 经度
+    }
+  }
+}
+2. 告警事件（触发时立即推送）
+
+{
+  "type": "event",                       // 消息类型：事件
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "event": "alert",                      // 事件名称：告警
+  "data": {                              // 事件数据体
+    "alert_type": "rear_vehicle",
+    // 告警类型：rear_vehicle/heart_rate_high/heart_rate_low/fatigue/fall_detected
+    "message": "后方来车，距离 3.2 米",   // 告警提示文本
+    "level": "warning"                   // 级别：info/warning/critical
+  }
+}
+3. 骑行状态变更事件
+
+{
+  "type": "event",                       // 消息类型：事件
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "event": "ride_state_changed",         // 事件名称：骑行状态变更
+  "data": {                              // 事件数据体
+    "old": "idle",                       // 原状态
+    "new": "riding"                      // 新状态
+    //idle:riding:paused:finished
+  }
+}
+4. 结束骑行后发送（历史详情）
+
+{
+  "type": "history",                     // 消息类型：历史详情
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "data": {                              // 数据体
+    "id": "ride_20250424_143205",        // 记录唯一 ID
+    "start_time": "14:32:05",            // 开始时间：时:分:秒
+    "total_distance": 15.25,             // 骑行距离：km
+    "total_time": "01:00:00",            // 总时长：时:分:秒
+    "moving_time": "00:57:00",           // 移动时长：时:分:秒
+    "avg_speed": 15.2,                   // 平均速度：km/h
+    "max_speed": 35.5,                   // 最大速度：km/h
+    "avg_power": 185,                    // 平均功率：W
+    "max_power": 420,                    // 最大功率：W
+    "avg_hr": 145,                       // 平均心率：bpm
+    "max_hr": 172,                       // 最大心率：bpm
+    "max_elevation_gain": 120.5,         // 最大爬升高度：m
+    "calories": 450                      // 消耗热量：kcal
+  }
+}
+5. 文件响应（FIT / GPX 完整发送）
+
+{
+  "type": "file_response",               // 消息类型：文件响应
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "file_type": "fit",                    // 文件类型：fit/gpx
+  "ride_id": "ride_20250424_143205",     // 所属记录 ID
+  "filename": "ride_20250424_143205.fit",// 文件名
+  "size": 15360,                         // 文件大小：字节
+  "data": "base64encodedstring..."       // 文件内容：base64 编码
+}
+6. 设备心跳（每 5 秒发送一次）
+
+{
+  "type": "heartbeat",                   // 消息类型：心跳
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "device": "SMART-RIDE",                // 设备名称
+  "channel": "ble"                       // 通道标识：ble/mqtt
+}
+7. 蓝牙连接成功握手帧（连接建立后第一条消息）
+
+{
+  "isConnect": "OK"                     // 连接状态：OK=连接成功
+}
+8. 导航目的地并开始导航
+
+{
+  "type": "nav_destination",             // 消息类型：导航目的地
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "data": {                              // 数据体
+    "gps": {                             // GPS 坐标
+      "lat": 31.230416,                  // 纬度
+      "lon": 121.473701                  // 经度
+    }
+  }
+}
+9. 偏航提醒（需重新规划路线并导航）
+
+{
+  "type": "off_route",                   // 消息类型：偏航提醒
+  "timestamp": "14:32:05",               // 时间戳：时:分:秒
+  "data": {                              // 数据体
+    "crab": 1                            // 偏航标志：1=已偏航
+  }
+}
+二、App → 树莓派 发送的命令
+10. 骑行状态控制
+
+{
+  "cmd": "set_ride_state",               // 命令：设置骑行状态
+  "payload": {                           // 参数体
+    "ride_state": 1-4                    // 骑行状态：1=开始骑行 2=暂停骑行 3=恢复骑行 4=结束骑行
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+
+11. 设置阈值
+
+{
+  "cmd": "set_threshold",                // 命令：设置阈值
+  "payload": {                           // 参数体
+    "heart_rate_max": 180,               // 心率最大值：bpm
+    "heart_rate_min": 50,                // 心率最小值：bpm
+    "rear_dist_alert": 5.0,              // 后方来车阈值：m
+    "weight": 70                         // 体重：kg
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+12. 设置告警开关
+
+{
+  "cmd": "set_alert_switch",             // 命令：设置告警开关
+  "payload": {                           // 参数体
+    "alert": "rear_vehicle",             // 告警名称
+    "enabled": true                      // 开关状态：true=开 false=关
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+可设置的 alert 名称：
+
+rear_vehicle：后方来车告警
+heart_rate：心率异常告警
+fatigue：疲劳提醒
+fall：姿态异常/摔车检测
+13. 设置导航目的地
+
+{
+  "cmd": "set_nav_destination",          // 命令：设置导航目的地
+  "payload": {                           // 参数体
+    "gps": {                             // GPS 坐标
+      "lat": 31.230416,                  // 目的地纬度
+      "lon": 121.473701                  // 目的地经度
+    },
+    "name": "家"                         // 目的地名称（用于语音播报）
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+14. 请求 FIT 文件
+
+{
+  "cmd": "request_fit",                  // 命令：请求 FIT 文件
+  "payload": {                           // 参数体
+    "ride_id": "ride_20250424_143205"    // 记录唯一 ID
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+15. 请求 GPX 文件
+
+{
+  "cmd": "request_gpx",                  // 命令：请求 GPX 文件
+  "payload": {                           // 参数体
+    "ride_id": "ride_20250424_143205"    // 记录唯一 ID
+  },
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
+16. App 心跳 / Ping
+
+{
+  "cmd": "ping",                         // 命令：心跳检测
+  "payload": {},                         // 参数体：空
+  "timestamp": "14:32:05"                // 时间戳：时:分:秒
+}
