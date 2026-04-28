@@ -32,13 +32,12 @@ class ConnectPage(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ========== 左侧：蓝色渐变品牌区 ==========
+        # ========== 左侧：深灰品牌区 ==========
         left_panel = QFrame()
         left_panel.setFixedWidth(420)
         left_panel.setStyleSheet("""
             QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #3b82f6, stop:1 #7c3aed);
+                background-color: #2E2E3A;
                 border: none;
             }
         """)
@@ -49,12 +48,12 @@ class ConnectPage(QWidget):
 
         left_layout.addStretch(1)
 
-        # 图标区域（圆角浅蓝背景 + 骑行图标，放大）
+        # 图标区域（圆角暗色背景 + 骑行图标）
         icon_bg = QFrame()
         icon_bg.setFixedSize(150, 150)
         icon_bg.setStyleSheet("""
             QFrame {
-                background-color: rgba(255,255,255,0.15);
+                background-color: rgba(255,255,255,0.08);
                 border-radius: 30px;
                 border: none;
             }
@@ -83,7 +82,7 @@ class ConnectPage(QWidget):
         # 副标题
         brand_sub = QLabel("连接您的智能骑行设备，开启全新的骑行体验。\n实时监测数据，优化训练效果。")
         brand_sub.setAlignment(Qt.AlignCenter)
-        brand_sub.setStyleSheet("color: rgba(255,255,255,0.75); background: transparent;")
+        brand_sub.setStyleSheet("color: #AAAAAA; background: transparent;")
         brand_sub.setFont(QFont("Noto Sans CJK SC", 11))
         brand_sub.setWordWrap(True)
         left_layout.addWidget(brand_sub)
@@ -101,16 +100,16 @@ class ConnectPage(QWidget):
 
         main_layout.addWidget(left_panel)
 
-        # ========== 右侧：白色连接区 ==========
+        # ========== 右侧：深灰连接区 ==========
         right_panel = QFrame()
-        right_panel.setStyleSheet("background-color: #FFFFFF; border: none;")
+        right_panel.setStyleSheet("background-color: #2C2C2C; border: none;")
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(32, 24, 32, 20)
         right_layout.setSpacing(0)
 
         # 标题
         header = QLabel("连接设备")
-        header.setStyleSheet("color: #111827; background: transparent;")
+        header.setStyleSheet("color: #FFFFFF; background: transparent;")
         header.setFont(QFont("Noto Sans CJK SC", 20, QFont.Bold))
         right_layout.addWidget(header)
 
@@ -118,7 +117,7 @@ class ConnectPage(QWidget):
 
         # 副标题
         sub_header = QLabel("选择一种方式连接您的智能骑行设备")
-        sub_header.setStyleSheet("color: #6B7280; background: transparent;")
+        sub_header.setStyleSheet("color: #AAAAAA; background: transparent;")
         sub_header.setFont(QFont("Noto Sans CJK SC", 12))
         right_layout.addWidget(sub_header)
 
@@ -171,7 +170,7 @@ class ConnectPage(QWidget):
         # 分割线（紧挨内容卡片，跳过连接上移）
         line = QFrame()
         line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #E5E7EB;")
+        line.setStyleSheet("background-color: #3A3A3A;")
         right_layout.addWidget(line)
 
         right_layout.addSpacing(10)
@@ -182,12 +181,12 @@ class ConnectPage(QWidget):
         self.skip_btn.setFont(QFont("Noto Sans CJK SC", 12))
         self.skip_btn.setStyleSheet("""
             QPushButton {
-                color: #6B7280;
+                color: #888888;
                 background: transparent;
                 border: none;
             }
-            QPushButton:hover { color: #374151; }
-            QPushButton:pressed { color: #111827; }
+            QPushButton:hover { color: #AAAAAA; }
+            QPushButton:pressed { color: #FFFFFF; }
         """)
         self.skip_btn.setCursor(Qt.PointingHandCursor)
         self.skip_btn.clicked.connect(self.skip_clicked.emit)
@@ -199,7 +198,7 @@ class ConnectPage(QWidget):
 
     def _build_wifi_page(self):
         page = QFrame()
-        page.setStyleSheet("background-color: #F9FAFB; border-radius: 12px; border: none;")
+        page.setStyleSheet("background-color: #2A2A2A; border-radius: 12px; border: none;")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(0)
@@ -209,7 +208,7 @@ class ConnectPage(QWidget):
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignCenter)
         self.qr_label.setFixedSize(180, 180)
-        self.qr_label.setStyleSheet("background-color: #FFFFFF; border-radius: 8px; border: none;")
+        self.qr_label.setStyleSheet("background-color: #1A1A1A; border-radius: 8px; border: none;")
         self._load_qrcode()
         layout.addWidget(self.qr_label, alignment=Qt.AlignCenter)
 
@@ -218,7 +217,7 @@ class ConnectPage(QWidget):
         # 提示文字（放大）
         tip = QLabel("使用App扫描二维码连接")
         tip.setAlignment(Qt.AlignCenter)
-        tip.setStyleSheet("color: #6B7280; background: transparent; border: none;")
+        tip.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
         tip.setFont(QFont("Noto Sans CJK SC", 12))
         layout.addWidget(tip)
 
@@ -227,7 +226,7 @@ class ConnectPage(QWidget):
         # MQTT 地址标签（纯文字，无背景框）
         self.mqtt_addr_label = QLabel("mqtt://broker.emqx.io:1883")
         self.mqtt_addr_label.setAlignment(Qt.AlignCenter)
-        self.mqtt_addr_label.setStyleSheet("color: #6B7280; background: transparent; border: none;")
+        self.mqtt_addr_label.setStyleSheet("color: #888888; background: transparent; border: none;")
         self.mqtt_addr_label.setFont(QFont("Helvetica", 11))
         layout.addWidget(self.mqtt_addr_label, alignment=Qt.AlignCenter)
 
@@ -240,10 +239,10 @@ class ConnectPage(QWidget):
         auto_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #2563eb;
+                color: #4DB8FF;
                 border: none;
             }
-            QPushButton:pressed { color: #1d4ed8; }
+            QPushButton:pressed { color: #3AA8F0; }
         """)
         auto_btn.setCursor(Qt.PointingHandCursor)
         self._set_btn_icon(auto_btn, "二维码.png", 16)
@@ -261,7 +260,7 @@ class ConnectPage(QWidget):
 
         # 卡片
         card = QFrame()
-        card.setStyleSheet("background-color: #F9FAFB; border-radius: 12px; border: none;")
+        card.setStyleSheet("background-color: #2A2A2A; border-radius: 12px; border: none;")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 18, 20, 18)
         card_layout.setSpacing(0)
@@ -278,7 +277,7 @@ class ConnectPage(QWidget):
         # 设备物理地址
         addr_title = QLabel("设备物理地址")
         addr_title.setAlignment(Qt.AlignCenter)
-        addr_title.setStyleSheet("color: #6B7280; background: transparent; border: none;")
+        addr_title.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
         addr_title.setFont(QFont("Noto Sans CJK SC", 11))
         card_layout.addWidget(addr_title)
 
@@ -288,8 +287,8 @@ class ConnectPage(QWidget):
         mac_label = QLabel("2C:CF:67:F2:ED:B2")
         mac_label.setAlignment(Qt.AlignCenter)
         mac_label.setStyleSheet("""
-            color: #111827;
-            background-color: #FFFFFF;
+            color: #FFFFFF;
+            background-color: #1A1A1A;
             border-radius: 6px;
             border: none;
             padding: 5px 10px;
@@ -305,13 +304,13 @@ class ConnectPage(QWidget):
         self.ble_btn.setFont(QFont("Noto Sans CJK SC", 12, QFont.Bold))
         self.ble_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2563eb;
-                color: #FFFFFF;
+                background-color: #4DB8FF;
+                color: #111111;
                 border-radius: 8px;
                 border: none;
             }
-            QPushButton:pressed { background-color: #1d4ed8; }
-            QPushButton:disabled { background-color: #9CA3AF; color: #E5E7EB; }
+            QPushButton:pressed { background-color: #3AA8F0; }
+            QPushButton:disabled { background-color: #555555; color: #888888; }
         """)
         self.ble_btn.setCursor(Qt.PointingHandCursor)
         self.ble_btn.clicked.connect(self._on_ble_btn_clicked)
@@ -324,7 +323,7 @@ class ConnectPage(QWidget):
         # 提示文字（在卡片外，单行）
         self.ble_tip = QLabel("点击“开始广播”后，在您的手机或设备上搜索蓝牙设备并连接")
         self.ble_tip.setAlignment(Qt.AlignCenter)
-        self.ble_tip.setStyleSheet("color: #9CA3AF; background: transparent; border: none;")
+        self.ble_tip.setStyleSheet("color: #888888; background: transparent; border: none;")
         self.ble_tip.setFont(QFont("Noto Sans CJK SC", 10))
         page_layout.addWidget(self.ble_tip)
 
@@ -364,7 +363,7 @@ class ConnectPage(QWidget):
         card.setFixedHeight(38)
         card.setStyleSheet("""
             QFrame {
-                background-color: rgba(255,255,255,0.12);
+                background-color: rgba(255,255,255,0.06);
                 border-radius: 10px;
                 border: none;
             }
@@ -395,20 +394,20 @@ class ConnectPage(QWidget):
     def _update_tab_style(self):
         active = """
             QPushButton {
-                background-color: #2563eb;
-                color: #FFFFFF;
+                background-color: #4DB8FF;
+                color: #111111;
                 border-radius: 8px;
                 border: none;
             }
         """
         inactive = """
             QPushButton {
-                background-color: #F3F4F6;
-                color: #6B7280;
+                background-color: #3A3A4A;
+                color: #888888;
                 border-radius: 8px;
                 border: none;
             }
-            QPushButton:hover { background-color: #E5E7EB; }
+            QPushButton:hover { background-color: #4A4A5A; }
         """
         self.tab_wifi.setStyleSheet(active if self.tab_wifi.isChecked() else inactive)
         self.tab_ble.setStyleSheet(active if self.tab_ble.isChecked() else inactive)
@@ -429,7 +428,7 @@ class ConnectPage(QWidget):
         self.ble_btn.setEnabled(False)
         self.ble_btn.setText("广播中...")
         self.ble_tip.setText("正在广播蓝牙信号，请在手机上搜索并连接...")
-        self.ble_tip.setStyleSheet("color: #f59e0b; background: transparent;")
+        self.ble_tip.setStyleSheet("color: #f39c12; background: transparent;")
         self.ble_advertising_requested.emit()
 
     # -------------- 外部调用接口 --------------
@@ -438,21 +437,21 @@ class ConnectPage(QWidget):
         if connected:
             self.mqtt_addr_label.setText("已连接")
             self.mqtt_addr_label.setStyleSheet("""
-                color: #16a34a;
-                background-color: #dcfce7;
+                color: #2ecc71;
+                background-color: #1a3a2a;
                 border-radius: 6px;
                 padding: 3px 8px;
             """)
         else:
             self.mqtt_addr_label.setText("mqtt://broker.emqx.io:1883")
             self.mqtt_addr_label.setStyleSheet("""
-                color: #374151;
-                background-color: #F3F4F6;
+                color: #888888;
+                background-color: #1A1A1A;
                 border-radius: 6px;
                 padding: 3px 8px;
             """)
 
-    def set_ble_status(self, status: str, color: str = "#9CA3AF"):
+    def set_ble_status(self, status: str, color: str = "#888888"):
         self.ble_tip.setText(status)
         self.ble_tip.setStyleSheet(f"color: {color}; background: transparent;")
 
@@ -461,7 +460,7 @@ class ConnectPage(QWidget):
 
     def on_ble_connected(self):
         self.ble_tip.setText("蓝牙已连接")
-        self.ble_tip.setStyleSheet("color: #16a34a; background: transparent;")
+        self.ble_tip.setStyleSheet("color: #2ecc71; background: transparent;")
 
     def on_mqtt_connected(self):
         self.set_wifi_status(True)
