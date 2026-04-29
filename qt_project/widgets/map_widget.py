@@ -345,6 +345,30 @@ class AMapAPIHandler(QObject):
             parent.start_navigation(lat, lon)
         print(f"[AMapAPI] 离线导航开始: {lat}, {lon}")
 
+    @pyqtSlot(float, float)
+    def notify_nav_started(self, lat: float, lon: float):
+        """在线/离线模式：通知 Python 端导航已开始（JS 端已自行启动导航 UI）
+
+        Args:
+            lat: 目的地纬度
+            lon: 目的地经度
+        """
+        parent = self.parent()
+        if parent:
+            if hasattr(parent, '_dest_lat'):
+                parent._dest_lat = lat
+            if hasattr(parent, '_dest_lon'):
+                parent._dest_lon = lon
+            if hasattr(parent, 'is_navigating'):
+                parent.is_navigating = True
+            if hasattr(parent, 'navigation_handler'):
+                parent.navigation_handler.nav_started.emit()
+                print(f"[AMapAPI] 导航开始信号已发射: {lat}, {lon}")
+            else:
+                print(f"[AMapAPI] 警告: parent 没有 navigation_handler")
+        else:
+            print(f"[AMapAPI] 警告: notify_nav_started 没有 parent")
+
 
 class PinyinHandler(QObject):
     """拼音处理后端 - 使用智能拼音输入法，支持分页"""
@@ -3138,6 +3162,10 @@ class MapWidget(QWidget):
                 doNavigate().then(function() {{
                     startNavUI();
                     startNavMonitoring();
+                    // 通知 Python 端导航已开始
+                    if (typeof amapAPI !== 'undefined' && amapAPI && destPos) {{
+                        amapAPI.notify_nav_started(destPos[1], destPos[0]);
+                    }}
                     // 修改按钮为"结束导航"
                     var navBtn = document.querySelector('.btn-nav');
                     if (navBtn) {{
@@ -3152,6 +3180,10 @@ class MapWidget(QWidget):
                 // 路线已规划好，直接进入导航
                 startNavUI();
                 startNavMonitoring();
+                // 通知 Python 端导航已开始
+                if (typeof amapAPI !== 'undefined' && amapAPI && destPos) {{
+                    amapAPI.notify_nav_started(destPos[1], destPos[0]);
+                }}
                 // 修改按钮为"结束导航"
                 var navBtn = document.querySelector('.btn-nav');
                 if (navBtn) {{
@@ -4298,6 +4330,7 @@ class MapWidget(QWidget):
                 print("[NavStart] 无 yaw 数据，跳过方向播报")
 
             self.nav_instruction.emit("，".join(speak_parts))
+            self.navigation_handler.nav_started.emit()
             return True
         else:
             # 在线模式：计算相对方向（如果有 yaw）并通过 JS 传递
@@ -4331,7 +4364,12 @@ class MapWidget(QWidget):
             self.is_navigating = True
             self._dest_lat = dest_lat
             self._dest_lon = dest_lon
+            self.navigation_handler.nav_started.emit()
             return True
+
+    def get_navigation_destination(self):
+        """返回当前导航目的地坐标 (lat, lon)，未设置时返回 (None, None)"""
+        return self._dest_lat, self._dest_lon
 
     def _on_route_planned(self, route):
         """Valhalla 路线规划完成回调（仅绘制路线，不进入导航）"""

@@ -1562,23 +1562,18 @@ class BikeComputerPro(QWidget):
         #     self.voice_player.speak(status)
 
     def on_nav_started(self):
-        """导航开始回调——发送导航目的地到 App，并播报总览"""
-        print("[Main] 导航开始")
-        # 发送导航目的地到 MQTT/BLE
+        """导航开始回调——发送导航目的地到 App"""
+        print("[Main] 导航开始回调触发")
         dest_lat, dest_lon = self.page_map.get_navigation_destination()
+        print(f"[Main] 导航目的地坐标: lat={dest_lat}, lon={dest_lon}")
         if dest_lat is not None and dest_lon is not None:
-            payload = {
-                "type": "nav_destination",
-                "timestamp": time.strftime("%H:%M:%S"),
-                "data": {
-                    "gps": {"lat": dest_lat, "lon": dest_lon}
-                }
-            }
-            if self.comm_service.mqtt_bridge.is_app_connected():
-                self.comm_service.mqtt_bridge.publish("delayData", payload)
-            if self.comm_service.ble_server.has_connected_client():
-                self.comm_service.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+            print(f"[Main] 准备发送导航目的地 via comm_service")
+            self.comm_service._push_event("nav_destination", {
+                "gps": {"lat": dest_lat, "lon": dest_lon}
+            })
             print(f"[Main] 导航目的地已发送: ({dest_lat}, {dest_lon})")
+        else:
+            print("[Main] 导航目的地为空，跳过发送")
 
     def on_nav_stopped(self):
         """导航结束回调——只语音播报，UI 由 voice player 回调统一显示"""

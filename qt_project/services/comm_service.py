@@ -464,9 +464,12 @@ class CommService(QObject):
     def _push_event(self, event_type: str, payload: dict):
         self.event_pushed.emit(event_type, payload)
         t = time.strftime("%H:%M:%S", time.localtime())
+        print(f"[_push_event] event_type={event_type}, payload={payload}")
 
         # BLE
-        if self.ble_server.has_connected_client():
+        ble_connected = self.ble_server.has_connected_client()
+        print(f"[_push_event] BLE connected={ble_connected}")
+        if ble_connected:
             try:
                 event_payload = {
                     "type": "event",
@@ -475,11 +478,14 @@ class CommService(QObject):
                     "data": payload,
                 }
                 self.ble_server.notify(json.dumps(event_payload, ensure_ascii=False))
+                print(f"[_push_event] BLE 事件已发送: {event_type}")
             except Exception as e:
                 print(f"[CommService] BLE事件推送失败: {e}")
 
         # MQTT
-        if self.mqtt_bridge.is_app_connected():
+        mqtt_app_connected = self.mqtt_bridge.is_app_connected()
+        print(f"[_push_event] MQTT app_connected={mqtt_app_connected}")
+        if mqtt_app_connected:
             try:
                 event_payload = {
                     "type": "event",
@@ -488,8 +494,11 @@ class CommService(QObject):
                     "data": payload,
                 }
                 self.mqtt_bridge.publish("delayData", event_payload)
+                print(f"[_push_event] MQTT 事件已发送: {event_type} -> delayData_1")
             except Exception as e:
                 print(f"[CommService] MQTT事件推送失败: {e}")
+        else:
+            print(f"[_push_event] MQTT 未发送: App 未握手连接")
 
     def _flush_buffer_for_channel(self, channel: str):
         if self.buffer_queue.is_empty():
