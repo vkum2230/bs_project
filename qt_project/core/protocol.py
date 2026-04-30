@@ -157,6 +157,7 @@ class SensorData:
 @dataclass
 class RideSummary:
     """单次骑行的统计摘要"""
+    id: str = ""                     # 骑行记录唯一 ID
     start_time: float = 0.0
     end_time: float = 0.0
     total_distance: float = 0.0      # km

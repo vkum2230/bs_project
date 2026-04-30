@@ -303,6 +303,7 @@ class NavEngine(QObject):
         如果服务未启动，自动尝试启动。
         失败时 emit route_failed 并返回 None。
         """
+        print(f"[NavEngine.plan_route] 开始规划: ({start_lat},{start_lon}) -> ({end_lat},{end_lon})")
         # 0. 确保服务可用
         if not self._is_service_healthy():
             if not self._start_valhalla_service():
@@ -336,7 +337,14 @@ class NavEngine(QObject):
 
         if "trip" not in data:
             err = data.get("error", "未知错误")
-            self.route_failed.emit(str(err))
+            err_code = data.get("error_code", 0)
+            # 友好化常见错误
+            friendly = str(err)
+            if err_code == 171:
+                friendly = "目的地超出离线地图覆盖范围（当前仅支持湘潭市），请使用在线导航或更换目的地"
+            elif err_code == 154:
+                friendly = "无法找到可达路线，请检查起点/终点是否在道路上"
+            self.route_failed.emit(friendly)
             return None
 
         trip = data["trip"]
@@ -345,6 +353,7 @@ class NavEngine(QObject):
         self._shape = _decode_polyline6(shape_encoded)
         self._maneuvers = leg.get("maneuvers", [])
         self._current_step = 0
+        self._deviation_count = 0  # 重置偏航计数，避免重新规划后立即再次触发偏航
 
         total_dist = trip.get("summary", {}).get("length", 0)
         total_time = trip.get("summary", {}).get("time", 0)
@@ -366,6 +375,7 @@ class NavEngine(QObject):
             "raw": data,
         }
         self._route = route
+        print(f"[NavEngine.plan_route] 规划成功, 总长={route['total_distance_km']:.2f}km, 发射 route_planned")
         self.route_planned.emit(route)
         return route
 
@@ -408,6 +418,7 @@ class NavEngine(QObject):
             self._deviation_count += 1
         else:
             self._deviation_count = 0
+        print(f"[NavEngine.update_position] min_dist={min_dist:.1f}m, off_route={off_route}, deviation_count={self._deviation_count}, nearest_idx={nearest_idx}")
 
         # 3. 推进 maneuver 索引
         # 当当前点已超过某个 maneuver 的 end_shape_index 时，步进到下一个
@@ -461,7 +472,7 @@ class NavEngine(QObject):
             "current_instruction": instruction,
             "distance_to_next_maneuver": round(dist_to_next, 1),
             "remaining_distance_km": round(remaining_dist / 1000, 2),
-            "remaining_time_sec": None,  # 简单处理，不估算动态时间
+            "remaining_time_sec": None,
             "off_route": off_route,
             "deviation_count": self._deviation_count,
             "arrived": arrived,
@@ -470,6 +481,7 @@ class NavEngine(QObject):
             "nearest_shape_index": nearest_idx,
             "relative_direction": rel_dir,
         }
+        print(f"[NavEngine.update_position] 发射 nav_updated: step={state['current_step']}, off_route={state['off_route']}, dev_count={state['deviation_count']}, instruction={instruction}")
         self.nav_updated.emit(state)
         return state
 

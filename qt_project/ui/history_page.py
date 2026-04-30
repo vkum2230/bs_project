@@ -9,6 +9,7 @@
 - 支持"查看轨迹"和"删除记录"
 """
 
+import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -240,10 +241,11 @@ class HistoryPage(QWidget):
 
         _add_detail(2, 0, "avg_hr", "平均心率")
         _add_detail(2, 1, "max_hr", "最大心率")
-        _add_detail(2, 2, "total_elevation_gain", "累计爬升")
+        _add_detail(2, 2, "max_elevation_gain", "最大爬升高度")
         _add_detail(2, 3, "calories", "消耗热量")
 
-        _add_detail(3, 0, "max_elevation_gain", "最大爬升高度")
+        _add_detail(3, 0, "fit_file", "FIT 文件")
+        _add_detail(3, 1, "gpx_file", "GPX 文件")
 
         detail_layout.addLayout(stats_grid)
 
@@ -269,6 +271,15 @@ class HistoryPage(QWidget):
         )
         self.delete_btn.clicked.connect(self._on_delete_clicked)
         btn_layout.addWidget(self.delete_btn)
+
+        self.back_btn = QPushButton("↩ 返回")
+        self.back_btn.setFixedSize(80, 32)
+        self.back_btn.setStyleSheet(
+            "QPushButton { background-color: #95a5a6; color: #FFFFFF; border-radius: 6px; font-size: 12px; }"
+            "QPushButton:pressed { background-color: #7f8c8d; }"
+        )
+        self.back_btn.clicked.connect(self._on_back_clicked)
+        btn_layout.addWidget(self.back_btn)
 
         btn_layout.addStretch(1)
         detail_layout.addLayout(btn_layout)
@@ -361,13 +372,24 @@ class HistoryPage(QWidget):
         self._detail_labels["max_power"].setText(f"{meta.get('max_power', 0.0):.0f} W")
         self._detail_labels["avg_hr"].setText(f"{meta.get('avg_hr', 0.0):.0f} bpm")
         self._detail_labels["max_hr"].setText(f"{meta.get('max_hr', 0.0):.0f} bpm")
-        self._detail_labels["total_elevation_gain"].setText(f"{meta.get('total_elevation_gain', 0.0):.1f} m")
         self._detail_labels["max_elevation_gain"].setText(f"{meta.get('max_elevation_gain', 0.0):.1f} m")
         self._detail_labels["calories"].setText(f"{meta.get('calories', 0.0):.0f} kcal")
+
+        fit_path = meta.get("fit_path", "")
+        gpx_path = meta.get("gpx_path", "")
+        self._detail_labels["fit_file"].setText(os.path.basename(fit_path) if fit_path else "--")
+        self._detail_labels["gpx_file"].setText(os.path.basename(gpx_path) if gpx_path else "--")
 
     def _on_view_map_clicked(self):
         if self._current_ride_id and self._current_track_points:
             self.ride_selected.emit(self._current_ride_id, self._current_track_points)
+
+    def _on_back_clicked(self):
+        """返回按钮：隐藏详情面板，清空选中"""
+        self.detail_panel.hide()
+        self._current_ride_id = ""
+        self._current_track_points = []
+        self.list_widget.clearSelection()
 
     def _on_delete_clicked(self):
         if not self._current_ride_id or not self.ride_repo:

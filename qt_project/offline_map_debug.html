@@ -146,22 +146,6 @@
             z-index: 1000;
         }
 
-        /* 导航面板 */
-        .nav-panel {
-            position: absolute;
-            bottom: 20px;
-            left: 8px;
-            right: 420px;
-            background: rgba(46, 204, 113, 0.95);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 12px;
-            z-index: 2500;
-            display: none;
-        }
-        .nav-instruction { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
-        .nav-detail { font-size: 12px; opacity: 0.9; }
-
         /* ========== 右侧半透明键盘 ========== */
         .keyboard-wrapper {
             position: fixed;
@@ -338,12 +322,6 @@
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- 导航面板 -->
-    <div class="nav-panel" id="navPanel">
-        <div class="nav-instruction" id="navInstruction">准备出发</div>
-        <div class="nav-detail" id="navDetail">--</div>
     </div>
 
     <!-- 键盘 -->
@@ -578,7 +556,6 @@
                 return;
             }
             isNavigating = true;
-            document.getElementById('navPanel').style.display = 'block';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'inline-block';
             // 修改按钮为"结束导航"
@@ -595,7 +572,6 @@
 
         window.stopNavigation = function(silent) {
             isNavigating = false;
-            document.getElementById('navPanel').style.display = 'none';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'none';
             if (routeLine) {
@@ -631,7 +607,7 @@
         };
 
         // 绘制 Valhalla 离线路线
-        window.drawOfflineRoute = function(shape, maneuvers) {
+        window.drawOfflineRoute = function(shape, maneuvers, shouldFitBounds) {
             if (!map || !shape || shape.length < 2) return;
             offlineRouteShape = shape;
             offlineManeuvers = maneuvers || [];
@@ -644,9 +620,11 @@
                 weight: 6,
                 opacity: 0.9
             }).addTo(map);
-            // 适应视野
-            var bounds = L.latLngBounds(shape);
-            map.fitBounds(bounds, {padding: [40, 40]});
+            // 适应视野（导航中不自动调整，避免覆盖当前位置居中）
+            if (shouldFitBounds !== false) {
+                var bounds = L.latLngBounds(shape);
+                map.fitBounds(bounds, {padding: [40, 40]});
+            }
             console.log('离线路线绘制完成，共' + shape.length + '个点，' + offlineManeuvers.length + '个导航指令');
         };
 

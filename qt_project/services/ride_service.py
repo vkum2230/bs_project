@@ -173,9 +173,11 @@ class RideService(QObject):
         self.summary.calories = round(weight * self.summary.total_distance * 1.036, 0)
 
         # 保存骑行记录（FIT + GPX）
+        ride_id = ""
         if self.ride_repo:
             try:
                 ride_id = self.ride_repo.save_ride(self.summary, self._track_points)
+                self.summary.id = ride_id
                 print(f"[RideService] 骑行记录已保存: {ride_id}, 轨迹点数: {len(self._track_points)}")
             except Exception as e:
                 print(f"[RideService] 保存骑行记录失败: {e}")

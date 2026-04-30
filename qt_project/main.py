@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
+import time
 # 必须在导入 PyQt5 之前设置，否则 DPI 缩放禁用无效
 os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
@@ -1047,6 +1048,7 @@ class BikeComputerPro(QWidget):
         # 进入数据页后播报欢迎语音（只播放一次）
         if not self._welcome_played:
             self._welcome_played = True
+            self.add_voice_message("你好，我是骑行小智", icon="🤖")
             self._play_welcome_voice()
 
     def show_data_page(self):
@@ -1590,15 +1592,7 @@ class BikeComputerPro(QWidget):
 
         # 检测偏航并发送偏航提醒到 App
         if "偏离路线" in instruction or "off_route" in instruction.lower():
-            payload = {
-                "type": "off_route",
-                "timestamp": time.strftime("%H:%M:%S"),
-                "data": {"crab": 1}
-            }
-            if self.comm_service.mqtt_bridge.is_app_connected():
-                self.comm_service.mqtt_bridge.publish("delayData", payload)
-            if self.comm_service.ble_server.has_connected_client():
-                self.comm_service.ble_server.notify(json.dumps(payload, ensure_ascii=False))
+            self.comm_service._push_event("off_route", {"crab": 1})
             print("[Main] 偏航提醒已发送")
 
         if self.voice_player:
@@ -1648,8 +1642,13 @@ class BikeComputerPro(QWidget):
         return text
     
     def on_nav_instruction(self, instruction):
-        """导航指令回调（旧版，用于兼容）——只语音播报，UI 由 voice player 回调统一显示"""
+        """导航指令回调（旧版，用于兼容）——语音播报 + 偏航检测发送 App"""
         print(f"导航指令: {instruction}")
+
+        # 离线模式偏航检测：发送偏航事件到 App
+        if "偏离路线" in instruction:
+            self.comm_service._push_event("off_route", {"crab": 1})
+            print("[Main] 偏航提醒已发送 (offline)")
 
         # 语音播报导航指令，voice player 内部会自动显示 🔊 消息
         if self.voice_player:
@@ -1799,25 +1798,38 @@ class BikeComputerPro(QWidget):
             lon = gps.get("lon")
             name = cmd.payload.get("name", "目的地")
             if lat is not None and lon is not None:
-                print(f"[Main] 设置导航目的地: {name} ({lat}, {lon})")
-                # 如果有地图页面且支持设置目的地
-                if hasattr(self, 'page_map') and self.page_map and hasattr(self.page_map, 'set_destination'):
-                    self.page_map.set_destination(lat, lon, name)
-                self.add_voice_message(f"导航到{name}", icon="🧭")
+                print(f"[Main] App设置导航目的地: {name} ({lat}, {lon})")
+                nav_ok = False
+                if hasattr(self, 'page_map') and self.page_map and hasattr(self.page_map, 'navigate_to'):
+                    result = self.page_map.navigate_to(lat, lon)
+                    # 离线模式返回 None（异步），在线模式返回 True/False
+                    if result is True:
+                        nav_ok = True
+                    elif result is False:
+                        nav_ok = False
+                    else:
+                        # 离线异步：不立即播报，等 MapWidget 回调（_on_route_planned → start_navigation → nav_instruction）
+                        nav_ok = None
+                if nav_ok is True:
+                    self.add_voice_message(f"导航到{name}", icon="🧭")
+                elif nav_ok is False:
+                    self.add_voice_message(f"无法导航到{name}，请检查GPS定位", icon="⚠️")
 
         elif cmd.cmd_type == AppCommandType.SET_THRESHOLD:
             print(f"[Main] 设置阈值: {cmd.payload}")
-            # 保存到配置中
+            # 保存到配置中（只更新 payload 中存在的字段）
             config = get_config()
             if "heart_rate_max" in cmd.payload:
                 config.set("heart_rate_max", cmd.payload["heart_rate_max"])
             if "heart_rate_min" in cmd.payload:
                 config.set("heart_rate_min", cmd.payload["heart_rate_min"])
             if "rear_dist_alert" in cmd.payload:
-                config.set("rear_dist_alert", cmd.payload["rear_dist_alert"])
+                config.set("rear_dist_alert_m", cmd.payload["rear_dist_alert"])
             if "weight" in cmd.payload:
-                config.set("weight", cmd.payload["weight"])
+                config.set("weight_kg", cmd.payload["weight"])
             config.save()
+            if hasattr(self, 'page_settings') and self.page_settings:
+                self.page_settings.reload_config()
             self.add_voice_message("阈值已更新", icon="⚙️")
 
         elif cmd.cmd_type == AppCommandType.SET_ALERT_SWITCH:
@@ -1825,8 +1837,9 @@ class BikeComputerPro(QWidget):
             enabled = cmd.payload.get("enabled", True)
             print(f"[Main] 设置告警开关: {alert_name} = {enabled}")
             config = get_config()
-            config.set(f"alert_{alert_name}", enabled)
-            config.save()
+            config.set_alert(alert_name, enabled)
+            if hasattr(self, 'page_settings') and self.page_settings:
+                self.page_settings.reload_config()
             self.add_voice_message(f"{alert_name}告警已{'开启' if enabled else '关闭'}", icon="🔔")
 
         elif cmd.cmd_type == AppCommandType.PING:
@@ -1957,6 +1970,29 @@ class BikeComputerPro(QWidget):
         self._on_ride_stats_updated(summary)
         if self.alert_service:
             self.alert_service.reset()
+
+        # 发送骑行历史详情到 App（MQTT + BLE）
+        if summary.id:
+            def _fmt_sec(s):
+                t = int(s)
+                h, m, s = t // 3600, (t % 3600) // 60, t % 60
+                return f"{h:02d}:{m:02d}:{s:02d}"
+            self.comm_service._push_event("history", {
+                "id": summary.id,
+                "start_time": time.strftime("%H:%M:%S", time.localtime(summary.start_time)) if summary.start_time else "--",
+                "total_distance": round(summary.total_distance, 2),
+                "total_time": _fmt_sec(summary.total_time),
+                "moving_time": _fmt_sec(summary.moving_time),
+                "avg_speed": round(summary.avg_speed, 1),
+                "max_speed": round(summary.max_speed, 1),
+                "avg_power": int(summary.avg_power),
+                "max_power": int(summary.max_power),
+                "avg_hr": int(summary.avg_hr),
+                "max_hr": int(summary.max_hr),
+                "max_elevation_gain": round(summary.max_elevation_gain, 1),
+                "calories": int(summary.calories),
+            })
+            print(f"[Main] 骑行历史已发送: {summary.id}")
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:

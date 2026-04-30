@@ -230,6 +230,21 @@ class SettingsPage(QWidget):
             }
         """
 
+    def reload_config(self):
+        """从配置管理器重新加载所有设置到 UI 控件（供外部修改配置后刷新）"""
+        self.spin_hr_max.setValue(self.config.get("heart_rate_max", 180))
+        self.spin_hr_min.setValue(self.config.get("heart_rate_min", 50))
+        self.spin_weight.setValue(self.config.get("weight_kg", 70.0))
+        self.spin_rear.setValue(self.config.get("rear_dist_alert_m", 5.0))
+        vol = self.config.get("voice_volume", 85)
+        self.slider_volume.setValue(vol)
+        self.lbl_volume_val.setText(f"{vol}%")
+        alerts = self.config.get("alerts_enabled", {})
+        self.chk_rear.setChecked(alerts.get("rear_vehicle", True))
+        self.chk_hr.setChecked(alerts.get("heart_rate", True))
+        self.chk_fatigue.setChecked(alerts.get("fatigue", True))
+        self.chk_fall.setChecked(alerts.get("fall", True))
+
     def _checkbox_style(self) -> str:
         return """
             QCheckBox {

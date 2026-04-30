@@ -85,8 +85,8 @@ class NavigationHandler(QObject):
         self._current_step = current_step
         self._total_steps = total_steps
 
-        # 避免重复播报相同指令
-        if instruction != self._last_instruction:
+        # 避免重复播报相同指令（偏航类消息除外，每次都需要通知）
+        if instruction != self._last_instruction or "偏离路线" in instruction:
             self._last_instruction = instruction
             print(f"[NavigationHandler] 导航指令 [{current_step+1}/{total_steps}]: {instruction}")
             self.nav_instruction.emit(instruction, detail)
@@ -849,6 +849,7 @@ class MapWidget(QWidget):
         self._dest_lat = None
         self._dest_lon = None
         self.is_navigating = False  # 是否正在导航
+        self._pending_auto_navigate = False  # App设置目的地后自动开始导航
         self._map_html_loaded = False  # HTML 页面是否已成功加载
         self._skip_next_map_loaded = False  # 切换模式时跳过地图加载播报
 
@@ -860,6 +861,7 @@ class MapWidget(QWidget):
         self._offline_nav_active = False
         self._last_nav_instruction = ""
         self._last_rel_dir = ""
+        self._is_rerouting = False  # 防止偏航重复重新规划
         if self.nav_engine:
             self.nav_engine.route_planned.connect(self._on_route_planned)
             self.nav_engine.route_failed.connect(self._on_route_failed)
@@ -1128,23 +1130,6 @@ class MapWidget(QWidget):
             line-height: 1.6;
         }}
         
-        /* 导航面板 - 键盘左侧 */
-        .nav-panel {{
-            position: absolute;
-            bottom: 20px;
-            left: 8px;
-            right: 420px;
-            background: rgba(46, 204, 113, 0.95);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 12px;
-            z-index: 2500;
-            display: none;  /* 默认隐藏 */
-        }}
-        
-        .nav-instruction {{ font-size: 17px; font-weight: 600; margin-bottom: 4px; }}
-        .nav-detail {{ font-size: 12px; opacity: 0.9; }}
-        
         /* ========== 右侧半透明键盘 ========== */
         .keyboard-wrapper {{
             position: fixed;
@@ -1406,12 +1391,6 @@ class MapWidget(QWidget):
             </div>
             <div id="suggestionsList" class="suggestions-list"></div>
         </div>
-    </div>
-    
-    <!-- 导航面板 - 键盘左侧 -->
-    <div class="nav-panel" id="navPanel">
-        <div class="nav-instruction" id="navInstruction">准备出发</div>
-        <div class="nav-detail" id="navDetail">--</div>
     </div>
     
     <!-- ========== 右侧半透明键盘 ========== -->
@@ -1686,6 +1665,8 @@ class MapWidget(QWidget):
         var currentNavStep = 0;
         var navSteps = [];
         var navMonitorTimer = null;
+        window._isRerouting = false;
+        window._lastRerouteTime = 0;
         
         // 开始导航监控（模拟实时导航）
         function startNavMonitoring() {{
@@ -1756,10 +1737,6 @@ class MapWidget(QWidget):
             }}
 
             console.log('[Navigation] 播报步骤', stepIndex + 1, ':', speakText);
-
-            // 更新 UI
-            document.getElementById('navInstruction').textContent = instruction;
-            document.getElementById('navDetail').textContent = detail;
 
             // 通知 Python 端（发送带距离的友好文本）
             if (typeof navHandler !== 'undefined' && navHandler) {{
@@ -2659,10 +2636,15 @@ class MapWidget(QWidget):
                 return;
             }}
             
-            // 清除旧路线
+            // 清除旧路线和红色导航直线
             if (window.routeLine) {{
                 console.log('[DEBUG] Removing old route line');
                 map.remove(window.routeLine);
+            }}
+            if (window.navStraightLine) {{
+                console.log('[DEBUG] Removing old nav straight line');
+                map.remove(window.navStraightLine);
+                window.navStraightLine = null;
             }}
             
             // 创建带方向箭头的路线
@@ -2712,9 +2694,26 @@ class MapWidget(QWidget):
                 console.log('[DEBUG] 标记位置已更新到路线起点/终点');
             }}
             
-            map.setFitView(fitObjects, {{
-                padding: [80, 80, 80, 420]  // 为右侧键盘留空间
-            }});
+            // 重新画红色导航直线（连接当前位置和终点）
+            if (isNavigating && currentPos && destPos) {{
+                window.navStraightLine = new AMap.Polyline({{
+                    path: [currentPos, destPos],
+                    strokeColor: '#f44336',
+                    strokeWeight: 4,
+                    strokeOpacity: 0.6,
+                    lineJoin: 'round',
+                    zIndex: 99
+                }});
+                window.navStraightLine.setMap(map);
+                console.log('[DEBUG] 红色导航直线已重新绘制');
+            }}
+            
+            // 只在非导航状态下调整视野（导航中保持当前位置在屏幕中央）
+            if (!isNavigating) {{
+                map.setFitView(fitObjects, {{
+                    padding: [80, 80, 80, 420]  // 为右侧键盘留空间
+                }});
+            }}
             
             console.log('✅ 路线绘制完成，共' + points.length + '个点');
         }}
@@ -2844,12 +2843,11 @@ class MapWidget(QWidget):
             
             if (routeInfo && routeInfo.steps && routeInfo.steps.length > 0) {{
                 navSteps = routeInfo.steps;
+                currentNavStep = 0;  // 重新规划后重置步骤索引
 
-                // 仅保存数据、更新面板文本（不显示面板，不启动监控）
+                // 仅保存数据（不显示面板，不启动监控）
                 var step = routeInfo.steps[0];
                 var instruction = step.instruction ? step.instruction.replace(/<[^>]+>/g, '') : '开始导航';
-                document.getElementById('navInstruction').textContent = instruction;
-                document.getElementById('navDetail').textContent = '剩余' + formatDist(routeInfo.distance) + '|预计' + formatTime(routeInfo.time);
 
                 console.log('✅ 路线规划完成:', instruction);
                 console.log('✅ 路线详情:', routeInfo.distance, '米,', routeInfo.time, '秒');
@@ -2888,8 +2886,6 @@ class MapWidget(QWidget):
                 navBtn.onclick = enterNavMode;
                 navBtn.title = '导航模式';
             }}
-
-            document.getElementById('navPanel').style.display = 'none';
 
             // 重置地图旋转（仅高德地图支持）
             if (typeof map.setRotation === 'function') {{
@@ -3151,9 +3147,6 @@ class MapWidget(QWidget):
                 }});
                 window.navStraightLine.setMap(map);
 
-                // 显示导航面板
-                document.getElementById('navPanel').style.display = 'block';
-
                 showToast('🧭 已进入导航模式', 'success');
             }};
 
@@ -3216,6 +3209,60 @@ class MapWidget(QWidget):
                 }}
                 if (yawMarker) {{
                     yawMarker.setPosition(currentPos);
+                }}
+
+                // 偏航检测与自动重新规划
+                if (window.routePoints && window.routePoints.length > 2 && !window._isRerouting) {{
+                    var distToRoute = Infinity;
+                    if (AMap.GeometryUtil && AMap.GeometryUtil.distanceToLine) {{
+                        distToRoute = AMap.GeometryUtil.distanceToLine(currentPos, window.routePoints);
+                    }} else {{
+                        // 自定义点到线段距离计算（米）
+                        function pointToSegmentDistance(p, a, b) {{
+                            var ax = a[0], ay = a[1];
+                            var bx = b[0], by = b[1];
+                            var px = p[0], py = p[1];
+                            var dx = bx - ax, dy = by - ay;
+                            if (dx === 0 && dy === 0) {{
+                                return Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay));
+                            }}
+                            var t = ((px-ax)*dx + (py-ay)*dy) / (dx*dx + dy*dy);
+                            t = Math.max(0, Math.min(1, t));
+                            var nx = ax + t*dx, ny = ay + t*dy;
+                            var dLng = px - nx, dLat = py - ny;
+                            var latFactor = 111000;
+                            var lngFactor = 111000 * Math.cos(py * Math.PI / 180);
+                            return Math.sqrt((dLng*lngFactor)*(dLng*lngFactor) + (dLat*latFactor)*(dLat*latFactor));
+                        }}
+                        for (var i = 0; i < window.routePoints.length - 1; i++) {{
+                            var d = pointToSegmentDistance(currentPos, window.routePoints[i], window.routePoints[i+1]);
+                            if (d < distToRoute) distToRoute = d;
+                        }}
+                    }}
+                    if (distToRoute > 100) {{
+                        console.log('[Reroute] 偏航 detected, dist=' + distToRoute.toFixed(1) + 'm');
+                        var now = Date.now();
+                        if (!window._lastRerouteTime || now - window._lastRerouteTime > 15000) {{
+                            window._lastRerouteTime = now;
+                            window._isRerouting = true;
+                            showToast('⚠️ 已偏离路线，正在重新规划...', 'warning', 3000);
+                            if (typeof navHandler !== 'undefined' && navHandler) {{
+                                navHandler.on_nav_instruction('您已偏离路线，正在重新规划', '已偏离路线', -1, -1);
+                            }}
+                            var wasNavigating = isNavigating;
+                            doNavigate().then(function() {{
+                                window._isRerouting = false;
+                                showToast('✅ 路线已重新规划', 'success', 2000);
+                                if (typeof navHandler !== 'undefined' && navHandler) {{
+                                    navHandler.on_nav_instruction('路线已重新规划', '', -1, -1);
+                                }}
+                            }}).catch(function(err) {{
+                                isNavigating = wasNavigating;
+                                window._isRerouting = false;
+                                showToast('重新规划失败，请检查网络', 'error');
+                            }});
+                        }}
+                    }}
                 }}
 
                 // 检查是否需要播报下一条指令
@@ -3472,22 +3519,6 @@ class MapWidget(QWidget):
             z-index: 1000;
         }}
 
-        /* 导航面板 */
-        .nav-panel {{
-            position: absolute;
-            bottom: 20px;
-            left: 8px;
-            right: 420px;
-            background: rgba(46, 204, 113, 0.95);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 12px;
-            z-index: 2500;
-            display: none;
-        }}
-        .nav-instruction {{ font-size: 17px; font-weight: 600; margin-bottom: 4px; }}
-        .nav-detail {{ font-size: 12px; opacity: 0.9; }}
-
         /* ========== 右侧半透明键盘 ========== */
         .keyboard-wrapper {{
             position: fixed;
@@ -3664,12 +3695,6 @@ class MapWidget(QWidget):
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- 导航面板 -->
-    <div class="nav-panel" id="navPanel">
-        <div class="nav-instruction" id="navInstruction">准备出发</div>
-        <div class="nav-detail" id="navDetail">--</div>
     </div>
 
     <!-- 键盘 -->
@@ -3904,7 +3929,6 @@ class MapWidget(QWidget):
                 return;
             }}
             isNavigating = true;
-            document.getElementById('navPanel').style.display = 'block';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'inline-block';
             // 修改按钮为"结束导航"
@@ -3921,7 +3945,6 @@ class MapWidget(QWidget):
 
         window.stopNavigation = function(silent) {{
             isNavigating = false;
-            document.getElementById('navPanel').style.display = 'none';
             var stopBtn = document.querySelector('.btn-stop');
             if (stopBtn) stopBtn.style.display = 'none';
             if (routeLine) {{
@@ -3957,7 +3980,7 @@ class MapWidget(QWidget):
         }};
 
         // 绘制 Valhalla 离线路线
-        window.drawOfflineRoute = function(shape, maneuvers) {{
+        window.drawOfflineRoute = function(shape, maneuvers, shouldFitBounds) {{
             if (!map || !shape || shape.length < 2) return;
             offlineRouteShape = shape;
             offlineManeuvers = maneuvers || [];
@@ -3970,9 +3993,11 @@ class MapWidget(QWidget):
                 weight: 6,
                 opacity: 0.9
             }}).addTo(map);
-            // 适应视野
-            var bounds = L.latLngBounds(shape);
-            map.fitBounds(bounds, {{padding: [40, 40]}});
+            // 适应视野（导航中不自动调整，避免覆盖当前位置居中）
+            if (shouldFitBounds !== false) {{
+                var bounds = L.latLngBounds(shape);
+                map.fitBounds(bounds, {{padding: [40, 40]}});
+            }}
             console.log('离线路线绘制完成，共' + shape.length + '个点，' + offlineManeuvers.length + '个导航指令');
         }};
 
@@ -4180,7 +4205,10 @@ class MapWidget(QWidget):
         self.web_view.page().runJavaScript(js_code)
 
         # 离线导航跟踪
-        if self._offline_nav_active and self.nav_engine and self.nav_engine.is_active():
+        nav_active = self._offline_nav_active and self.nav_engine and self.nav_engine.is_active()
+        print(f"[update_location] lat={lat}, lon={lon}, offline_nav_active={self._offline_nav_active}, nav_engine_active={nav_active}")
+        if nav_active:
+            print(f"[update_location] 调用 nav_engine.update_position({lat}, {lon})")
             self.nav_engine.update_position(lat, lon)
 
     def update_yaw(self, angle):
@@ -4291,12 +4319,18 @@ class MapWidget(QWidget):
                     weight: 6,
                     opacity: 0.9
                 }}).addTo(map);
-                document.getElementById('navPanel').style.display = 'block';
+                // 红色直线连接当前位置和目的地
+                if (window.navStraightLine) map.removeLayer(window.navStraightLine);
+                window.navStraightLine = L.polyline([[{self.current_lat}, {self.current_lon}], [{dest_lat}, {dest_lon}]], {{
+                    color: '#f44336',
+                    weight: 4,
+                    opacity: 0.6
+                }}).addTo(map);
                 var stopBtn = document.querySelector('.btn-stop');
                 if (stopBtn) stopBtn.style.display = 'inline-block';
-                document.getElementById('navInstruction').textContent = '开始离线导航';
-                document.getElementById('navDetail').textContent = '正在获取导航指令...';
-                if(map) map.setZoom(16);
+                if(map) {{
+                    map.setView([{self.current_lat}, {self.current_lon}], 16);
+                }}
             """
             self.web_view.page().runJavaScript(js)
 
@@ -4344,6 +4378,11 @@ class MapWidget(QWidget):
                     print(f"[NavStart-Online] yaw={yaw}, route_bearing={route_bearing:.1f}, rel_dir={rel_dir}")
 
             js_code = f"""
+                // 兜底：如果 JS 端 currentPos 尚未就绪，用 Python 端最新坐标补位
+                if (!currentPos) {{
+                    currentPos = [{self.current_lon or 0}, {self.current_lat or 0}];
+                    console.log('[JS] currentPos 兜底补位:', currentPos);
+                }}
                 destPos = [{dest_lon}, {dest_lat}];
                 window._navRelDir = "{rel_dir}";
                 // 添加目的地标记
@@ -4358,22 +4397,85 @@ class MapWidget(QWidget):
                         imageSize: new AMap.Size(32, 32)
                     }})
                 }});
-                doNavigate();
+                console.log('[JS] 在线导航开始, currentPos=', currentPos, 'destPos=', destPos);
+                doNavigate().catch(function(err) {{
+                    console.error('[JS] doNavigate 失败:', err);
+                    showToast('导航启动失败: ' + err, 'error', 3000);
+                }});
             """
             self.web_view.page().runJavaScript(js_code)
             self.is_navigating = True
             self._dest_lat = dest_lat
             self._dest_lon = dest_lon
             self.navigation_handler.nav_started.emit()
+            print(f"[MapWidget] 在线导航已启动: ({dest_lat}, {dest_lon})")
             return True
 
     def get_navigation_destination(self):
         """返回当前导航目的地坐标 (lat, lon)，未设置时返回 (None, None)"""
         return self._dest_lat, self._dest_lon
 
+    def navigate_to(self, dest_lat: float, dest_lon: float):
+        """App 设置目的地并自动开始导航（根据当前在线/离线模式自动适配）
+
+        Args:
+            dest_lat: 目的地纬度
+            dest_lon: 目的地经度
+        """
+        self._dest_lat = dest_lat
+        self._dest_lon = dest_lon
+
+        # 无论当前位置是否已知，都先在地图上标记目的地
+        js_set_dest = f"""
+            destPos = [{dest_lon}, {dest_lat}];
+            if (typeof map !== 'undefined') {{
+                if (typeof destMarker !== 'undefined' && destMarker) {{
+                    if (window._mode === 'offline') map.removeLayer(destMarker);
+                    else map.remove(destMarker);
+                }}
+                if (window._mode === 'offline') {{
+                    destMarker = L.marker([{dest_lat}, {dest_lon}], {{
+                        icon: L.divIcon({{
+                            className: '',
+                            html: '<div style="width:32px;height:32px;background:#e74c3c;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:14px;">终</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        }})
+                    }}).addTo(map);
+                    map.setView([{dest_lat}, {dest_lon}], 14);
+                }}
+            }}
+        """
+        self.web_view.page().runJavaScript(js_set_dest)
+
+        if not self.current_lat or not self.current_lon:
+            print("[MapWidget] 无法导航：当前位置未知，已仅标记目的地")
+            self.nav_instruction.emit("无法导航：当前位置未知，请等待GPS定位")
+            return False
+
+        if self._mode == 'offline':
+            # 离线模式：先规划路线，规划完成后 _on_route_planned 会自动开始导航
+            self._pending_auto_navigate = True
+            print(f"[MapWidget] App导航请求(离线): 规划路线 ({self.current_lat}, {self.current_lon}) -> ({dest_lat}, {dest_lon})")
+            self.plan_offline_route(dest_lat, dest_lon)
+            return None  # 异步，结果通过信号回调
+        else:
+            # 在线模式：直接开始导航
+            print(f"[MapWidget] App导航请求(在线): 直接导航 -> ({dest_lat}, {dest_lon})")
+            return self.start_navigation(dest_lat, dest_lon)
+
     def _on_route_planned(self, route):
-        """Valhalla 路线规划完成回调（仅绘制路线，不进入导航）"""
-        print(f"[MapWidget] 离线路线规划完成，总长 {route['total_distance_km']:.2f} km")
+        """Valhalla 路线规划完成回调（绘制路线；若由 App 触发则自动进入导航）"""
+        self._is_rerouting = False
+        self._last_nav_instruction = ""  # 重置语音播报去重，避免重新规划后不播报
+        self._last_rel_dir = ""          # 重置方向去重
+        print(f"[MapWidget] _on_route_planned 被调用, offline_nav_active={self._offline_nav_active}, 总长={route['total_distance_km']:.2f}km, shape点数={len(route.get('shape', []))}")
+
+        # App 设置目的地后自动开始导航
+        if self._pending_auto_navigate and self._dest_lat and self._dest_lon:
+            self._pending_auto_navigate = False
+            print(f"[MapWidget] 自动开始离线导航: ({self._dest_lat}, {self._dest_lon})")
+            self.start_navigation(self._dest_lat, self._dest_lon)
         shape = route['shape']
         maneuvers = route['maneuvers']
         # 传给 JS 绘制
@@ -4386,9 +4488,20 @@ class MapWidget(QWidget):
             for m in maneuvers
         ])
         js = f"""
-            drawOfflineRoute({shape_js}, {maneuvers_js});
-            if(map) map.setZoom(14);
-            showToast('路线规划完成，点击导航开始骑行', 'success');
+            drawOfflineRoute({shape_js}, {maneuvers_js}, false);
+            // 红色直线连接当前位置和目的地
+            if (window.navStraightLine) map.removeLayer(window.navStraightLine);
+            if (destPos) {{
+                window.navStraightLine = L.polyline([[{self.current_lat or 0}, {self.current_lon or 0}], [destPos[1], destPos[0]]], {{
+                    color: '#f44336',
+                    weight: 4,
+                    opacity: 0.6
+                }}).addTo(map);
+            }}
+            if(map) {{
+                map.setView([{self.current_lat if self.current_lat is not None else 'destPos[1]'}, {self.current_lon if self.current_lon is not None else 'destPos[0]'}], 16);
+            }}
+            {'showToast("已重新规划路线", "success");' if self._offline_nav_active else "showToast('路线规划完成，点击导航开始骑行', 'success');"}
         """
         self.web_view.page().runJavaScript(js)
         # 不进入导航模式，不播报 — 等待用户点击"导航"按钮
@@ -4396,9 +4509,12 @@ class MapWidget(QWidget):
     def _on_route_failed(self, error_msg):
         """Valhalla 路线规划失败回调"""
         print(f"[MapWidget] 离线路线规划失败: {error_msg}")
-        self._offline_nav_active = False
+        self._is_rerouting = False  # 重置标志，允许下次重新规划
+        self._pending_auto_navigate = False  # 重置自动导航标志，避免下次意外触发
+        # 注意：偏航重新规划失败不应停止导航，只提示失败即可
         js = f"showToast('路线规划失败: {error_msg}', 'error');"
         self.web_view.page().runJavaScript(js)
+        self.nav_instruction.emit(f"路线规划失败: {error_msg}")
 
     def _on_nav_updated(self, state):
         """离线导航状态更新回调"""
@@ -4411,30 +4527,32 @@ class MapWidget(QWidget):
         arrived = state.get("arrived", False)
 
         if arrived:
-            js = "showToast('已到达目的地', 'success'); document.getElementById('navPanel').style.display='none';"
+            js = "showToast('已到达目的地', 'success');"
             self.web_view.page().runJavaScript(js)
             self.nav_instruction.emit("已到达目的地")
             self._offline_nav_active = False
             return
 
-        if off_route and state.get("deviation_count", 0) > 3:
-            self.nav_instruction.emit("您已偏离路线")
-            js = "document.getElementById('navInstruction').textContent = '已偏离路线';"
-            self.web_view.page().runJavaScript(js)
+        print(f"[_on_nav_updated] off_route={off_route}, deviation_count={state.get('deviation_count', 0)}, _is_rerouting={self._is_rerouting}, _dest=({self._dest_lat}, {self._dest_lon})")
+        if off_route and state.get("deviation_count", 0) > 0:
+            if not self._is_rerouting and self._dest_lat is not None and self._dest_lon is not None:
+                self._is_rerouting = True
+                print(f"[MapWidget] >>> 触发偏航重新规划: ({self.current_lat}, {self.current_lon}) -> ({self._dest_lat}, {self._dest_lon})")
+                self.nav_instruction.emit("您已偏离路线，正在重新规划")
+                if self.nav_engine:
+                    print(f"[MapWidget] 调用 nav_engine.plan_route()")
+                    self.nav_engine.plan_route(
+                        self.current_lon, self.current_lat,
+                        self._dest_lon, self._dest_lat,
+                        costing="bicycle"
+                    )
+                    print(f"[MapWidget] nav_engine.plan_route() 返回")
+                else:
+                    print(f"[MapWidget] nav_engine 为 None，无法重新规划")
+            else:
+                print(f"[MapWidget] 偏航但跳过重规划: _is_rerouting={self._is_rerouting}, _dest_lat={self._dest_lat}, _dest_lon={self._dest_lon}")
+                self.nav_instruction.emit("您已偏离路线")
             return
-
-        # 更新导航面板
-        rel_dir = state.get("relative_direction", "")
-        detail = f"剩余{remaining_km:.1f}公里"
-        if dist_next > 0:
-            detail += f" | 前方{dist_next:.0f}米{instruction}"
-        if rel_dir:
-            detail += f" | 路线在{rel_dir}"
-        js = f"""
-            document.getElementById('navInstruction').textContent = '{instruction}';
-            document.getElementById('navDetail').textContent = '{detail}';
-        """
-        self.web_view.page().runJavaScript(js)
 
         # 语音播报：1. 相对方向变化（只要有 yaw 数据就播报，不受距离限制）
         rel_dir = state.get("relative_direction", "")
