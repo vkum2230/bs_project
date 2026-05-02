@@ -67,6 +67,7 @@ class MqttBridge:
         on_connected: Optional[Callable[[], None]] = None,
         on_disconnected: Optional[Callable[[], None]] = None,
         on_app_connect: Optional[Callable[[], None]] = None,
+        on_app_disconnect: Optional[Callable[[], None]] = None,
     ):
         self.broker = broker
         self.port = port
@@ -75,6 +76,7 @@ class MqttBridge:
         self.on_connected = on_connected
         self.on_disconnected = on_disconnected
         self.on_app_connect = on_app_connect  # App 通过 appHeart_1 发来连接请求
+        self.on_app_disconnect = on_app_disconnect  # App 通过 appHeart_1 发来断开请求
         self._client = None
         self._connected = False
         self._app_connected = False  # App 是否已握手连接
@@ -189,7 +191,8 @@ class MqttBridge:
             if topic == self._topics["appHeart"]:
                 try:
                     data = json.loads(text)
-                    if data.get("isConnect") == "OK":
+                    connect_flag = data.get("isConnect", "")
+                    if connect_flag == "OK":
                         # App 请求连接，回复确认
                         self._app_connected = True
                         self.publish("deviceHeart", {"isConnect": "OK"})
@@ -197,6 +200,13 @@ class MqttBridge:
                         # 心跳由 CommService 通过 app_connected 信号管理
                         if self.on_app_connect:
                             self.on_app_connect()
+                    elif connect_flag == "NO":
+                        # App 主动断开连接
+                        self._app_connected = False
+                        self.publish("deviceHeart", {"isConnect": "NO"})
+                        print("[MqttBridge] App 已断开连接（收到 NO）")
+                        if self.on_app_disconnect:
+                            self.on_app_disconnect()
                 except Exception as e:
                     print(f"[MqttBridge] appHeart 解析失败: {e}")
                 return
@@ -215,8 +225,8 @@ class MqttBridge:
     def disconnect_app(self):
         """主动断开 App 连接（心跳由 CommService 停止）"""
         self._app_connected = False
-        self.publish("deviceHeart", {"isConnect": "OK"})
-        print("[MqttBridge] 已发送断开通知")
+        self.publish("deviceHeart", {"isConnect": "NO"})
+        print("[MqttBridge] 已发送断开通知（NO）")
 
 
 # ==============================================================================
@@ -309,6 +319,7 @@ class CommService(QObject):
             on_connected=lambda: self.mqtt_connected.emit(),
             on_disconnected=lambda: (self.mqtt_disconnected.emit(), self.app_disconnected.emit("mqtt")),
             on_app_connect=lambda: self._on_app_connect("mqtt"),
+            on_app_disconnect=lambda: self._on_app_disconnect("mqtt"),
         )
 
         # BLE 信号绑定
@@ -629,6 +640,11 @@ class CommService(QObject):
     def _on_ble_disconnected(self):
         print("[CommService] BLE 客户端已断开")
         self._ble_heartbeat_timer.stop()
+        # 通知 App BLE 已断开
+        try:
+            self.ble_server.notify('{"isConnect":"NO"}')
+        except Exception:
+            pass
         self.app_disconnected.emit("ble")
         self.ble_client_disconnected.emit()
 
@@ -636,6 +652,11 @@ class CommService(QObject):
         """App 已通过任一通道连接"""
         print(f"[CommService] App 已通过 [{channel}] 连接")
         self.app_connected.emit(channel)
+
+    def _on_app_disconnect(self, channel: str):
+        """App 已通过任一通道断开"""
+        print(f"[CommService] App 已通过 [{channel}] 断开")
+        self.app_disconnected.emit(channel)
 
     def _send_ble_heartbeat(self):
         """发送 BLE 心跳"""
@@ -675,7 +696,7 @@ class CommService(QObject):
             self.app_disconnected.emit("mqtt")
         if self.ble_server.has_connected_client():
             try:
-                self.ble_server.notify('{"isConnect":"OK"}')
+                self.ble_server.notify('{"isConnect":"NO"}')
             except Exception:
                 pass
             self.app_disconnected.emit("ble")

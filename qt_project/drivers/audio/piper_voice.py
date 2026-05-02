@@ -286,8 +286,21 @@ class HybridVoicePlayer:
             return False
         
         def _do_speak():
-            with self._lock:
-                print(f"[HybridVoice] 开始播报: {text[:30]}...")
+            import threading
+            thread_id = threading.current_thread().ident
+            
+            # 使用超时获取锁，防止前一个线程死锁导致永久阻塞
+            if not self._lock.acquire(timeout=30):
+                print(f"[HybridVoice] ✗ 获取播报锁超时（30秒），跳过本次播报: {text[:30]} (线程{thread_id})")
+                return False
+            try:
+                print(f"[HybridVoice] [线程{thread_id}] 开始播报: {text[:30]}...")
+                
+                # 清理可能卡住的 aplay 进程，防止音频设备被占用
+                try:
+                    subprocess.run(["pkill", "-9", "-f", "aplay"], capture_output=True, timeout=2)
+                except Exception:
+                    pass
                 
                 # 离线模式强制跳过网络检查
                 if self.force_offline:
@@ -361,6 +374,12 @@ class HybridVoicePlayer:
                 # 保底方案：espeak
                 print("[HybridVoice] 使用 espeak 保底...")
                 return self._speak_espeak(text)
+            finally:
+                try:
+                    self._lock.release()
+                    print(f"[HybridVoice] [线程{thread_id}] 锁已释放")
+                except RuntimeError:
+                    pass  # 锁未被当前线程持有
         
         if block:
             return _do_speak()

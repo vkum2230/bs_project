@@ -1,148 +1,27 @@
-python3 ./main.py 
-[Main] 配置加载完成，心率上限: 180
-已加载 34 个省级行政区（边界框模式）
-[TileServer] 瓦片服务器已启动: http://localhost:8766
-[TileServer] 瓦片根目录: /home/hedya/Desktop/bs_project/qt_project/maps/xiangtan_tiles
-[Main] 瓦片服务器 URL: http://localhost:8766/{z}/{x}/{y}.png
-[FinalVoice] 阿里云 TTS 就绪，模型: qwen3-tts-flash, 音色: Maia
-[FinalVoice] 系统音量已调至 85%
-[HybridVoice] 在线播放器 (Edge-TTS) 已加载
-[PiperVoice] 找到 Piper: /home/hedya/.local/share/piper/piper/piper
-[PiperVoice] 使用模型: /home/hedya/.local/share/piper/zh_CN/zh_CN-huayan-medium.onnx
-[OfflineVoice] Piper 已加载
-[OfflineVoice] MeloTTS 未安装: No module named 'melo'
-[HybridVoice] 离线播放器已加载
-[Main] 混合语音播放器初始化成功（支持离线）
-[Main] LED 控制器初始化成功
-[Volume] ✓ amixer -c 2 set PCM 85% unmute
-[Volume] ✗ amixer -c 2 set Headphone 85% unmute — amixer: Unable to find simple control 'Headphone',0
-[Volume] ✗ amixer -c 2 set Speaker 85% unmute — amixer: Unable to find simple control 'Speaker',0
-[Volume] ✗ amixer -c 2 set Digital 85% unmute — amixer: Unable to find simple control 'Digital',0
-[Volume] ✗ amixer set Master 85% unmute — amixer: Unable to find simple control 'Master',0
-[Volume] ✓ amixer set PCM 85% unmute
-[Volume] ✗ amixer set Headphone 85% unmute — amixer: Unable to find simple control 'Headphone',0
-[Volume] 系统音量已设置为 85%
-[Main] 已恢复上次音量设置: 85%
-[Ollama] 正在检查 Ollama 服务...
-[Ollama] 服务已在运行
-[Ollama] 发现 1 个可用模型:
-  - my-llama:latest
-[Ollama] 选择模型: my-llama:latest
-[Ollama] 测试模型连接...
-[Ollama] 大模型连接成功！使用模型: my-llama:latest
-[Main] 百炼在线模型初始化成功（模型: qwen-turbo）
-[Main] 统一大模型客户端已初始化
-ALSA lib pcm_asym.c:105:(_snd_pcm_asym_open) capture slave is not defined
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.front
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.rear
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.center_lfe
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.side
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround21
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround21
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround40
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround41
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround50
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround51
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.surround71
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.iec958
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.iec958
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.iec958
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.modem
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.modem
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.phoneline
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.phoneline
-Cannot connect to server socket err = No such file or directory
-Cannot connect to server request channel
-jack server is not running or cannot be started
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-Cannot connect to server socket err = No such file or directory
-Cannot connect to server request channel
-jack server is not running or cannot be started
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-ALSA lib pcm_oss.c:404:(_snd_pcm_oss_open) Cannot open device /dev/dsp
-ALSA lib pcm_oss.c:404:(_snd_pcm_oss_open) Cannot open device /dev/dsp
-ALSA lib pcm_a52.c:1036:(_snd_pcm_a52_open) a52 is only for playback
-ALSA lib conf.c:5695:(snd_config_expand) Unknown parameters {AES0 0x6 AES1 0x82 AES2 0x0 AES3 0x2 CARD 0}
-ALSA lib pcm.c:2722:(snd_pcm_open_noupdate) Unknown PCM iec958:{AES0 0x6 AES1 0x82 AES2 0x0 AES3 0x2 CARD 0}
-ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
-ALSA lib pcm_usb_stream.c:481:(_snd_pcm_usb_stream_open) Invalid card 'card'
-ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
-ALSA lib pcm_usb_stream.c:481:(_snd_pcm_usb_stream_open) Invalid card 'card'
-ALSA lib pcm_asym.c:105:(_snd_pcm_asym_open) capture slave is not defined
-ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
-Cannot connect to server socket err = No such file or directory
-Cannot connect to server request channel
-jack server is not running or cannot be started
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock
-[VoiceRecorder] 找到 ReSpeaker 输入设备: seeed2micvoicec: 1f000a4000.i2s-tlv320aic3x-hifi tlv320aic3x-hifi-0 (hw:2,0) (index=1)
-[VoiceRecognizer] 加载 Vosk 模型: ./vosk-model-small-cn-0.22
-LOG (VoskAPI:ReadDataFiles():model.cc:213) Decoding params beam=12 max-active=5000 lattice-beam=4
-LOG (VoskAPI:ReadDataFiles():model.cc:216) Silence phones 1:2:3:4:5:6:7:8:9:10
-LOG (VoskAPI:RemoveOrphanNodes():nnet-nnet.cc:948) Removed 0 orphan nodes.
-LOG (VoskAPI:RemoveOrphanComponents():nnet-nnet.cc:847) Removing 0 orphan components.
-LOG (VoskAPI:ReadDataFiles():model.cc:248) Loading i-vector extractor from ./vosk-model-small-cn-0.22/ivector/final.ie
-LOG (VoskAPI:ComputeDerivedVars():ivector-extractor.cc:183) Computing derived variables for iVector extractor
-LOG (VoskAPI:ComputeDerivedVars():ivector-extractor.cc:204) Done.
-LOG (VoskAPI:ReadDataFiles():model.cc:282) Loading HCL and G from ./vosk-model-small-cn-0.22/graph/HCLr.fst ./vosk-model-small-cn-0.22/graph/Gr.fst
-LOG (VoskAPI:ReadDataFiles():model.cc:308) Loading winfo ./vosk-model-small-cn-0.22/graph/phones/word_boundary.int
-[VoiceRecognizer] Vosk 模型加载成功
-[ButtonHandler] 按钮监控已启动 (GPIO 17)
-[ButtonVoiceAssistant] 按钮监听已启动 (GPIO 17)
-[ButtonVoiceAssistant] 语音队列线程已启动
-[Main] 按钮语音助手初始化成功（已集成统一大模型）
-[Main] 按住 ReSpeaker 按钮开始录音（红灯），松开处理（绿灯）
-[Main] 骑行记录仓库已初始化
-[CommService] 启动通信服务...
-[BleServer] SDP 服务注册成功: sudo sdptool add --channel=1 SP[WifiServer] WebSocket 服务已启动: ws://0.0.0.0:8765
-
-[BleServer] 蓝牙已设置为可发现/可连接
-[BleServer] 蓝牙服务已启动，等待连接...
-[MqttBridge] MQTT 连接启动: broker.emqx.io:1883
-[Main] 通信服务已启动（BLE + WiFi）
-[Main] 骑行服务已初始化
-[Main] 安全告警服务已初始化
-qt.qpa.wayland: Wayland does not support QWindow::requestActivate()
-qt.qpa.wayland: Wayland does not support QWindow::requestActivate()
-qt.qpa.wayland: Setting cursor position is not possible on wayland
-[SmartPinyinIME] 正在加载字库...
-[SmartPinyinIME] 加载完成: 1455汉字
-[PinyinHandler] 智能拼音输入法初始化成功
-[MapWidget] 正在加载 高德骑行地图, base_url=file:///home/hedya/Desktop/bs_project/qt_project/, html_len=90266
-[MapWidget] 已加载 高德骑行地图
-[MqttBridge] MQTT 连接成功 (client_id=b'smartride-pi5-3e478361', rc=0)
-[MqttBridge] 已订阅命令主题: smartride/command
-成功打开串口: /dev/ttyAMA2
-[Map] ✅ 地图加载成功!
-[Voice] ========== 播放欢迎语音 ==========
-[Voice] 使用播放器: HybridVoicePlayer
-[Voice] 开始播报: '你好，我是骑行小智'...
-[HybridVoice] 开始播报: 你好，我是骑行小智...[Voice] 播报调用返回: 成功
-
-[Voice] LED 设置为常亮绿色
-[Voice] ========== 欢迎语音处理完成 ==========
-[HybridVoice] 网络状态: 可用
-[HybridVoice] 优先尝试阿里云 TTS 在线播报（60秒总超时）...[VoiceMessage] > 🔊 你好，我是骑行小智 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1757 <module>]
-[HybridVoice] 阿里云 TTS 线程启动...
-[HybridVoice] 等待阿里云 TTS 完成...
-
-[FinalVoice] 播报: 你好，我是骑行小智
-[FinalVoice] 阿里云 TTS 尝试 1/2...
-[DEBUG] 调用前: dialog_container.visible=False, geo=PyQt5.QtCore.QRect(0, 0, 100, 104)
-[DEBUG] 调用后: dialog_container.visible=True, geo=PyQt5.QtCore.QRect(0, 695, 1024, 104)
-[DEBUG] dialog_container.parent=<__main__.BikeComputerPro object at 0x7fff5ac1a060>
-[DEBUG] dialog_box.visible=True, geo=PyQt5.QtCore.QRect(10, 9, 1004, 86)
-[DEBUG] dialog_msg.visible=True, geo=PyQt5.QtCore.QRect(11, 5, 982, 76)
-[FinalVoice] 流式合成完成
-[FinalVoice] ✓ aplay 播放成功
-[FinalVoice] ✓ 阿里云 TTS 播报成功
-[HybridVoice] 阿里云 TTS 线程完成，结果: True
-[HybridVoice] ✓ 阿里云 TTS 在线播报成功
+[Main] DataContext 更新后 -> speed=25.4, power=220.0, cadence=90.0, hr=145.0
+[Main] 推送 sensor 到 RideService, state=idle, speed=25.4
+[Main] RideService 返回, distance=0.0000
+[DEBUG] 收到位置数据: 27.848011, 112.931726
+[update_location] lat=27.848011, lon=112.931726, offline_nav_active=False, nav_engine_active=False
+[DEBUG] 省份检查: 当前=湖南省, 新=湖南省, 是否变化=False [来自: on_data_received]
+[CommService] MQTT 心跳已发送
+[MqttBridge] 收到 [appData_1]: {
+  "cmd": "set_nav_destination",
+  "payload": {
+    "gps": {
+      "lat": 28.848011,
+      "lon": 112.931726
+    }
+  },
+  "timestamp": "14:32:05"
+}
+[CommService] 收到 [mqtt] 命令: set_nav_destination
+[Main] 执行 App 命令: set_nav_destination
+[Main] App设置导航目的地: 目的地 (28.848011, 112.931726)
+[MapWidget] App导航请求(离线): 规划路线 (27.848011, 112.931726) -> (28.848011, 112.931726)
+[NavEngine.plan_route] 开始规划: (27.848011,112.931726) -> (28.848011,112.931726)
+[MapWidget] 离线路线规划失败: 请求失败: HTTP Error 400: Bad Request
+[VoiceMessage] > 🧭 导航到目的地 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1676 add_voice_message]
+[CommService] MQTT 心跳已发送
+[CommService] MQTT 心跳已发送
 退出程序...
-[TileServer] 瓦片服务器已停止
-[CommService] 停止通信服务...
-[BleServer] 服务异常: [Errno 9] Bad file descriptor
-[MqttBridge] MQTT 已断开 (rc=0, flags=DisconnectFlags(is_disconnect_packet_from_server=False))
-[CommService] BLE错误: [BleServer] 服务异常: [Errno 9] Bad file descriptor

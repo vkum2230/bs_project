@@ -1268,7 +1268,7 @@ class BikeComputerPro(QWidget):
         """长按连接标识符：主动断开 App 连接"""
         if self.connect != 0:
             print("[Main] 长按断开 App 连接")
-            self.add_voice_message("已断开与手机的连接", icon="📱")
+            # 消息由 _on_app_disconnected 统一显示，避免重复
             self.comm_service.disconnect_app()
             self.connect = 0
             self._update_connect_indicator()
@@ -1309,12 +1309,18 @@ class BikeComputerPro(QWidget):
             self.connect = 1
             self.add_voice_message("WiFi 连接成功", icon="🔊")
             if self.voice_player:
-                self.voice_player.speak("WiFi 连接成功", show_in_ui=False)
+                try:
+                    self.voice_player.speak("WiFi 连接成功", block=False, show_in_ui=False)
+                except Exception as e:
+                    print(f"[Main] WiFi连接语音播报异常: {e}")
         elif channel == "ble":
             self.connect = 2
             self.add_voice_message("蓝牙连接成功", icon="🔵")
             if self.voice_player:
-                self.voice_player.speak("蓝牙连接成功", show_in_ui=False)
+                try:
+                    self.voice_player.speak("蓝牙连接成功", block=False, show_in_ui=False)
+                except Exception as e:
+                    print(f"[Main] 蓝牙连接语音播报异常: {e}")
         self._update_connect_indicator()
         # 自动跳转到数据界面（如果当前在连接页面）
         if self.stacked_widget.currentIndex() == 0:
@@ -1328,6 +1334,11 @@ class BikeComputerPro(QWidget):
             self.connect = 0
             self._update_connect_indicator()
             self.add_voice_message("与手机的连接已断开", icon="📱")
+            if self.voice_player:
+                try:
+                    self.voice_player.speak("与手机的连接已断开", block=False, show_in_ui=False)
+                except Exception as e:
+                    print(f"[Main] 断开语音播报异常: {e}")
 
     # --------------------------------------------------------------------------
 
