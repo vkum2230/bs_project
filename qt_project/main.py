@@ -1339,6 +1339,9 @@ class BikeComputerPro(QWidget):
                     self.voice_player.speak("与手机的连接已断开", block=False, show_in_ui=False)
                 except Exception as e:
                     print(f"[Main] 断开语音播报异常: {e}")
+            # BLE 断开时恢复连接页面状态
+            if channel == "ble":
+                self.page_connect.on_ble_disconnected()
 
     # --------------------------------------------------------------------------
 

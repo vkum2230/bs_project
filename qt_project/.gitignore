@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+.lgd-nfy0
+*.log
+*.tmp
+
+# Large directories - do not commit
+valhalla/
+maps/xiangtan_tiles/
+maps/osm/
+maps/valhalla_data/
+
+# Claude temp
+.claude/
+
+# Thesis documents (not code)
+毕业设计论文_*.txt

@@ -274,8 +274,8 @@ class ConnectPage(QWidget):
 
         card_layout.addSpacing(12)
 
-        # 设备物理地址
-        addr_title = QLabel("设备物理地址")
+        # BLE 设备信息
+        addr_title = QLabel("BLE 设备名称")
         addr_title.setAlignment(Qt.AlignCenter)
         addr_title.setStyleSheet("color: #AAAAAA; background: transparent; border: none;")
         addr_title.setFont(QFont("Noto Sans CJK SC", 11))
@@ -283,18 +283,33 @@ class ConnectPage(QWidget):
 
         card_layout.addSpacing(12)
 
-        # MAC 地址（去掉边框）
-        mac_label = QLabel("2C:CF:67:F2:ED:B2")
-        mac_label.setAlignment(Qt.AlignCenter)
-        mac_label.setStyleSheet("""
+        # 广播名称
+        name_label = QLabel("SMART-RIDE")
+        name_label.setAlignment(Qt.AlignCenter)
+        name_label.setStyleSheet("""
             color: #FFFFFF;
             background-color: #1A1A1A;
             border-radius: 6px;
             border: none;
             padding: 5px 10px;
         """)
-        mac_label.setFont(QFont("Helvetica", 12, QFont.Bold))
-        card_layout.addWidget(mac_label, alignment=Qt.AlignCenter)
+        name_label.setFont(QFont("Helvetica", 12, QFont.Bold))
+        card_layout.addWidget(name_label, alignment=Qt.AlignCenter)
+
+        card_layout.addSpacing(12)
+
+        # Service UUID
+        uuid_label = QLabel("FF00")
+        uuid_label.setAlignment(Qt.AlignCenter)
+        uuid_label.setStyleSheet("""
+            color: #4DB8FF;
+            background-color: #1A1A1A;
+            border-radius: 6px;
+            border: none;
+            padding: 5px 10px;
+        """)
+        uuid_label.setFont(QFont("Helvetica", 10))
+        card_layout.addWidget(uuid_label, alignment=Qt.AlignCenter)
 
         card_layout.addSpacing(18)
 
@@ -321,7 +336,7 @@ class ConnectPage(QWidget):
         page_layout.addSpacing(14)
 
         # 提示文字（在卡片外，单行）
-        self.ble_tip = QLabel("点击“开始广播”后，在您的手机或设备上搜索蓝牙设备并连接")
+        self.ble_tip = QLabel("点击「开始广播」后，在手机App中扫描 BLE 设备并连接")
         self.ble_tip.setAlignment(Qt.AlignCenter)
         self.ble_tip.setStyleSheet("color: #888888; background: transparent; border: none;")
         self.ble_tip.setFont(QFont("Noto Sans CJK SC", 10))
@@ -461,6 +476,13 @@ class ConnectPage(QWidget):
     def on_ble_connected(self):
         self.ble_tip.setText("蓝牙已连接")
         self.ble_tip.setStyleSheet("color: #2ecc71; background: transparent;")
+
+    def on_ble_disconnected(self):
+        """蓝牙断开：恢复按钮和提示到初始状态"""
+        self.ble_btn.setEnabled(True)
+        self.ble_btn.setText("开始广播")
+        self.ble_tip.setText("点击「开始广播」后，在手机App中扫描 BLE 设备并连接")
+        self.ble_tip.setStyleSheet("color: #888888; background: transparent;")
 
     def on_mqtt_connected(self):
         self.set_wifi_status(True)

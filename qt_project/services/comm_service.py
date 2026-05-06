@@ -39,7 +39,7 @@ from core.protocol import (
     sensor_to_app_data,
     build_alert_payload,
 )
-from drivers.ble_server import BleServer
+from drivers.ble_gatt_server import BleGattServer as BleServer
 from persistence.buffer_queue import BufferQueue
 from persistence.ride_repository import RideRepository
 
@@ -308,7 +308,7 @@ class CommService(QObject):
         self.mqtt_last_push_time = 0.0
 
         # BLE 服务器（默认不启动，等用户点击"开始广播"）
-        self.ble_server = BleServer(host_address="2C:CF:67:F2:ED:B2", port=1)
+        self.ble_server = BleServer(device_name="SMART-RIDE")
 
         # MQTT 桥接器
         self.mqtt_bridge = MqttBridge(
@@ -645,6 +645,9 @@ class CommService(QObject):
             self.ble_server.notify('{"isConnect":"NO"}')
         except Exception:
             pass
+        # 停止 BLE 广播服务并清理状态
+        self.ble_server.stop_advertising()
+        self._ble_started = False
         self.app_disconnected.emit("ble")
         self.ble_client_disconnected.emit()
 
