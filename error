@@ -1,27 +1,20 @@
-[Main] DataContext 更新后 -> speed=25.4, power=220.0, cadence=90.0, hr=145.0
-[Main] 推送 sensor 到 RideService, state=idle, speed=25.4
-[Main] RideService 返回, distance=0.0000
-[DEBUG] 收到位置数据: 27.848011, 112.931726
-[update_location] lat=27.848011, lon=112.931726, offline_nav_active=False, nav_engine_active=False
-[DEBUG] 省份检查: 当前=湖南省, 新=湖南省, 是否变化=False [来自: on_data_received]
-[CommService] MQTT 心跳已发送
-[MqttBridge] 收到 [appData_1]: {
-  "cmd": "set_nav_destination",
-  "payload": {
-    "gps": {
-      "lat": 28.848011,
-      "lon": 112.931726
-    }
-  },
-  "timestamp": "14:32:05"
-}
-[CommService] 收到 [mqtt] 命令: set_nav_destination
-[Main] 执行 App 命令: set_nav_destination
-[Main] App设置导航目的地: 目的地 (28.848011, 112.931726)
-[MapWidget] App导航请求(离线): 规划路线 (27.848011, 112.931726) -> (28.848011, 112.931726)
-[NavEngine.plan_route] 开始规划: (27.848011,112.931726) -> (28.848011,112.931726)
-[MapWidget] 离线路线规划失败: 请求失败: HTTP Error 400: Bad Request
-[VoiceMessage] > 🧭 导航到目的地 [来自: /home/hedya/Desktop/bs_project/qt_project/./main.py:1676 add_voice_message]
-[CommService] MQTT 心跳已发送
-[CommService] MQTT 心跳已发送
-退出程序...
+【订单编号】：3301339154670018288
+
+【API KEY】：sk-89J3FipdvZeq8CNhBcobHewVPgjID1udm0Sqb2C2gVHL4SN8
+
+【支持的模型】: 余量查询界面查看模型列表，模型名一定要严格按照对应的格式填写。
+
+【关于售后】
+售后在查询key界面，有任何问题可随时询问。不要多人共享账号。
+
+【配置项目】
+请求地址:http://180.76.228.174:8001
+用量查询：http://180.76.228.174:8001/balance
+
+【支持的工具】
+目前已知的支持的工具：cc以及可以自定义服务商请求url的编程工具。
+
+【cc如何配置】
+在余量查询中查看。
+
+ps/glm-5.1
