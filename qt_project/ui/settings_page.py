@@ -12,8 +12,7 @@ from typing import Optional
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QDoubleSpinBox, QPushButton, QFrame,
-    QCheckBox, QGridLayout, QMessageBox, QSlider
+    QPushButton, QFrame, QCheckBox, QGridLayout, QMessageBox, QSlider
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -57,49 +56,139 @@ class SettingsPage(QWidget):
         lbl_hr_max = QLabel("心率上限 (bpm)")
         lbl_hr_max.setStyleSheet("color: #AAAAAA; background: transparent;")
         lbl_hr_max.setFont(QFont("Helvetica", 11))
-        self.spin_hr_max = QSpinBox()
-        self.spin_hr_max.setRange(60, 250)
-        self.spin_hr_max.setValue(self.config.get("heart_rate_max", 180))
-        self.spin_hr_max.setStyleSheet(self._spin_style())
+        self.hr_max_value = 180
+        self.hr_max_label = QLabel(str(self.hr_max_value))
+        self.hr_max_label.setStyleSheet("""
+            QLabel {
+                background-color: #3A3A4A;
+                color: #FFFFFF;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 50px;
+            }
+        """)
+        self.hr_max_label.setAlignment(Qt.AlignCenter)
+        hr_max_layout = QHBoxLayout()
+        hr_max_layout.setSpacing(2)
+        hr_max_layout.addWidget(self.hr_max_label)
+        self.btn_hr_max_minus = QPushButton("−")
+        self.btn_hr_max_minus.setFixedSize(32, 36)
+        self.btn_hr_max_minus.setStyleSheet(self._arrow_btn_style())
+        self.btn_hr_max_minus.clicked.connect(lambda: self._adjust_value("hr_max", -1))
+        self.btn_hr_max_plus = QPushButton("+")
+        self.btn_hr_max_plus.setFixedSize(32, 36)
+        self.btn_hr_max_plus.setStyleSheet(self._arrow_btn_style())
+        self.btn_hr_max_plus.clicked.connect(lambda: self._adjust_value("hr_max", 1))
+        hr_max_layout.addWidget(self.btn_hr_max_minus)
+        hr_max_layout.addWidget(self.btn_hr_max_plus)
         card_layout.addWidget(lbl_hr_max, 0, 0)
-        card_layout.addWidget(self.spin_hr_max, 0, 1)
+        card_layout.addLayout(hr_max_layout, 0, 1)
 
         # 心率下限
         lbl_hr_min = QLabel("心率下限 (bpm)")
         lbl_hr_min.setStyleSheet("color: #AAAAAA; background: transparent;")
         lbl_hr_min.setFont(QFont("Helvetica", 11))
-        self.spin_hr_min = QSpinBox()
-        self.spin_hr_min.setRange(30, 120)
-        self.spin_hr_min.setValue(self.config.get("heart_rate_min", 50))
-        self.spin_hr_min.setStyleSheet(self._spin_style())
+        self.hr_min_value = 50
+        self.hr_min_label = QLabel(str(self.hr_min_value))
+        self.hr_min_label.setStyleSheet("""
+            QLabel {
+                background-color: #3A3A4A;
+                color: #FFFFFF;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 50px;
+            }
+        """)
+        self.hr_min_label.setAlignment(Qt.AlignCenter)
+        hr_min_layout = QHBoxLayout()
+        hr_min_layout.setSpacing(2)
+        hr_min_layout.addWidget(self.hr_min_label)
+        self.btn_hr_min_minus = QPushButton("−")
+        self.btn_hr_min_minus.setFixedSize(32, 36)
+        self.btn_hr_min_minus.setStyleSheet(self._arrow_btn_style())
+        self.btn_hr_min_minus.clicked.connect(lambda: self._adjust_value("hr_min", -1))
+        self.btn_hr_min_plus = QPushButton("+")
+        self.btn_hr_min_plus.setFixedSize(32, 36)
+        self.btn_hr_min_plus.setStyleSheet(self._arrow_btn_style())
+        self.btn_hr_min_plus.clicked.connect(lambda: self._adjust_value("hr_min", 1))
+        hr_min_layout.addWidget(self.btn_hr_min_minus)
+        hr_min_layout.addWidget(self.btn_hr_min_plus)
         card_layout.addWidget(lbl_hr_min, 1, 0)
-        card_layout.addWidget(self.spin_hr_min, 1, 1)
+        card_layout.addLayout(hr_min_layout, 1, 1)
 
         # 体重
         lbl_weight = QLabel("体重 (kg)")
         lbl_weight.setStyleSheet("color: #AAAAAA; background: transparent;")
         lbl_weight.setFont(QFont("Helvetica", 11))
-        self.spin_weight = QDoubleSpinBox()
-        self.spin_weight.setRange(20.0, 200.0)
-        self.spin_weight.setDecimals(1)
-        self.spin_weight.setValue(self.config.get("weight_kg", 70.0))
-        self.spin_weight.setStyleSheet(self._spin_style())
+        self.weight_value = 70.0
+        self.weight_label = QLabel(f"{self.weight_value:.1f}")
+        self.weight_label.setStyleSheet("""
+            QLabel {
+                background-color: #3A3A4A;
+                color: #FFFFFF;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 50px;
+            }
+        """)
+        self.weight_label.setAlignment(Qt.AlignCenter)
+        weight_layout = QHBoxLayout()
+        weight_layout.setSpacing(2)
+        weight_layout.addWidget(self.weight_label)
+        self.btn_weight_minus = QPushButton("−")
+        self.btn_weight_minus.setFixedSize(32, 36)
+        self.btn_weight_minus.setStyleSheet(self._arrow_btn_style())
+        self.btn_weight_minus.clicked.connect(lambda: self._adjust_value("weight", -0.1))
+        self.btn_weight_plus = QPushButton("+")
+        self.btn_weight_plus.setFixedSize(32, 36)
+        self.btn_weight_plus.setStyleSheet(self._arrow_btn_style())
+        self.btn_weight_plus.clicked.connect(lambda: self._adjust_value("weight", 0.1))
+        weight_layout.addWidget(self.btn_weight_minus)
+        weight_layout.addWidget(self.btn_weight_plus)
         card_layout.addWidget(lbl_weight, 2, 0)
-        card_layout.addWidget(self.spin_weight, 2, 1)
+        card_layout.addLayout(weight_layout, 2, 1)
 
         # 后方来车距离阈值
         lbl_rear = QLabel("后方来车阈值 (m)")
         lbl_rear.setStyleSheet("color: #AAAAAA; background: transparent;")
         lbl_rear.setFont(QFont("Helvetica", 11))
-        self.spin_rear = QDoubleSpinBox()
-        self.spin_rear.setRange(1.0, 20.0)
-        self.spin_rear.setDecimals(1)
-        self.spin_rear.setValue(self.config.get("rear_dist_alert_m", 5.0))
-        self.spin_rear.setStyleSheet(self._spin_style())
+        self.rear_value = 5.0
+        self.rear_label = QLabel(f"{self.rear_value:.1f}")
+        self.rear_label.setStyleSheet("""
+            QLabel {
+                background-color: #3A3A4A;
+                color: #FFFFFF;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 50px;
+            }
+        """)
+        self.rear_label.setAlignment(Qt.AlignCenter)
+        rear_layout = QHBoxLayout()
+        rear_layout.setSpacing(2)
+        rear_layout.addWidget(self.rear_label)
+        self.btn_rear_minus = QPushButton("−")
+        self.btn_rear_minus.setFixedSize(32, 36)
+        self.btn_rear_minus.setStyleSheet(self._arrow_btn_style())
+        self.btn_rear_minus.clicked.connect(lambda: self._adjust_value("rear", -0.1))
+        self.btn_rear_plus = QPushButton("+")
+        self.btn_rear_plus.setFixedSize(32, 36)
+        self.btn_rear_plus.setStyleSheet(self._arrow_btn_style())
+        self.btn_rear_plus.clicked.connect(lambda: self._adjust_value("rear", 0.1))
+        rear_layout.addWidget(self.btn_rear_minus)
+        rear_layout.addWidget(self.btn_rear_plus)
         card_layout.addWidget(lbl_rear, 3, 0)
-        card_layout.addWidget(self.spin_rear, 3, 1)
+        card_layout.addLayout(rear_layout, 3, 1)
 
-        # 播报音量（移到系统设置卡片内）
+        # 播报音量
         lbl_volume = QLabel("播报音量")
         lbl_volume.setStyleSheet("color: #AAAAAA; background: transparent;")
         lbl_volume.setFont(QFont("Helvetica", 11))
@@ -176,7 +265,6 @@ class SettingsPage(QWidget):
         self.chk_fall.setStyleSheet(self._checkbox_style())
         checkbox_grid.addWidget(self.chk_fall, 0, 3)
 
-        # 让最后一列占满剩余空间，保持对齐
         checkbox_grid.setColumnStretch(4, 1)
 
         alert_layout.addLayout(checkbox_grid)
@@ -210,32 +298,41 @@ class SettingsPage(QWidget):
         layout.addLayout(btn_layout)
         layout.addStretch(1)
 
-    def _spin_style(self) -> str:
+        # 初始化值
+        self._load_values()
+
+    def _arrow_btn_style(self) -> str:
         return """
-            QSpinBox, QDoubleSpinBox {
-                background-color: #3A3A4A;
+            QPushButton {
+                background-color: #4A4A5A;
                 color: #FFFFFF;
-                border: 1px solid #555555;
                 border-radius: 6px;
-                padding: 4px;
-                min-width: 80px;
+                font-size: 18px;
+                font-weight: bold;
             }
-            QSpinBox::up-button, QDoubleSpinBox::up-button {
-                width: 0px;
-                border: none;
+            QPushButton:hover {
+                background-color: #5A5A6A;
             }
-            QSpinBox::down-button, QDoubleSpinBox::down-button {
-                width: 0px;
-                border: none;
+            QPushButton:pressed {
+                background-color: #4DB8FF;
             }
         """
 
+    def _load_values(self):
+        """加载配置值"""
+        self.hr_max_value = self.config.get("heart_rate_max", 180)
+        self.hr_min_value = self.config.get("heart_rate_min", 50)
+        self.weight_value = self.config.get("weight_kg", 70.0)
+        self.rear_value = self.config.get("rear_dist_alert_m", 5.0)
+
+        self.hr_max_label.setText(str(self.hr_max_value))
+        self.hr_min_label.setText(str(self.hr_min_value))
+        self.weight_label.setText(f"{self.weight_value:.1f}")
+        self.rear_label.setText(f"{self.rear_value:.1f}")
+
     def reload_config(self):
-        """从配置管理器重新加载所有设置到 UI 控件（供外部修改配置后刷新）"""
-        self.spin_hr_max.setValue(self.config.get("heart_rate_max", 180))
-        self.spin_hr_min.setValue(self.config.get("heart_rate_min", 50))
-        self.spin_weight.setValue(self.config.get("weight_kg", 70.0))
-        self.spin_rear.setValue(self.config.get("rear_dist_alert_m", 5.0))
+        """从配置管理器重新加载所有设置到 UI 控件"""
+        self._load_values()
         vol = self.config.get("voice_volume", 85)
         self.slider_volume.setValue(vol)
         self.lbl_volume_val.setText(f"{vol}%")
@@ -244,6 +341,21 @@ class SettingsPage(QWidget):
         self.chk_hr.setChecked(alerts.get("heart_rate", True))
         self.chk_fatigue.setChecked(alerts.get("fatigue", True))
         self.chk_fall.setChecked(alerts.get("fall", True))
+
+    def _adjust_value(self, name: str, delta: float):
+        """调整数值"""
+        if name == "hr_max":
+            self.hr_max_value = max(60, min(250, self.hr_max_value + delta))
+            self.hr_max_label.setText(str(int(self.hr_max_value)))
+        elif name == "hr_min":
+            self.hr_min_value = max(30, min(120, self.hr_min_value + delta))
+            self.hr_min_label.setText(str(int(self.hr_min_value)))
+        elif name == "weight":
+            self.weight_value = max(20.0, min(200.0, self.weight_value + delta))
+            self.weight_label.setText(f"{self.weight_value:.1f}")
+        elif name == "rear":
+            self.rear_value = max(1.0, min(20.0, self.rear_value + delta))
+            self.rear_label.setText(f"{self.rear_value:.1f}")
 
     def _checkbox_style(self) -> str:
         return """
@@ -292,21 +404,16 @@ class SettingsPage(QWidget):
         self.lbl_volume_val.setText(f"{value}%")
 
     def _on_volume_released(self):
-        """滑动结束时实时应用音量"""
         vol = self.slider_volume.value()
         print(f"[Settings] 滑块释放，应用音量 {vol}%")
         self._set_system_volume(vol)
 
     @staticmethod
     def _set_system_volume(volume: int) -> bool:
-        """通过 amixer 设置系统音量（覆盖在线/离线所有语音）
-        返回是否至少有一个控制项设置成功
-        """
         import subprocess
         vol = max(0, min(100, volume))
         success = False
 
-        # 先检测可用的声卡和控制项
         candidates = [
             ("amixer", "-c", "2", "set", "PCM", f"{vol}%", "unmute"),
             ("amixer", "-c", "2", "set", "Headphone", f"{vol}%", "unmute"),
@@ -336,10 +443,10 @@ class SettingsPage(QWidget):
         return success
 
     def _save_settings(self):
-        self.config.set("heart_rate_max", self.spin_hr_max.value())
-        self.config.set("heart_rate_min", self.spin_hr_min.value())
-        self.config.set("weight_kg", round(self.spin_weight.value(), 1))
-        self.config.set("rear_dist_alert_m", round(self.spin_rear.value(), 1))
+        self.config.set("heart_rate_max", int(self.hr_max_value))
+        self.config.set("heart_rate_min", int(self.hr_min_value))
+        self.config.set("weight_kg", round(self.weight_value, 1))
+        self.config.set("rear_dist_alert_m", round(self.rear_value, 1))
 
         alerts = {
             "rear_vehicle": self.chk_rear.isChecked(),
@@ -349,24 +456,87 @@ class SettingsPage(QWidget):
         }
         self.config.set("alerts_enabled", alerts)
 
-        # 保存并立即应用音量
         self.config.set("voice_volume", self.slider_volume.value())
         self._set_system_volume(self.slider_volume.value())
 
         self.config_saved.emit()
-        QMessageBox.information(self, "保存成功", "设置已保存并生效")
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("保存成功")
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #2A2A2A;
+            }
+            QMessageBox QLabel {
+                color: #FFFFFF;
+            }
+        """)
+        ok_btn = msg_box.addButton(QMessageBox.Ok)
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                color: #000000;
+                background-color: #FFFFFF;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 6px 20px;
+                font-size: 13px;
+                min-width: 60px;
+            }
+            QPushButton:hover {
+                background-color: #E0E0E0;
+            }
+            QPushButton:pressed {
+                background-color: #D0D0D0;
+            }
+        """)
+        msg_box.exec_()
 
     def _reset_defaults(self):
-        reply = QMessageBox.question(
-            self, "恢复默认", "确定要恢复默认设置吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.spin_hr_max.setValue(180)
-            self.spin_hr_min.setValue(50)
-            self.spin_weight.setValue(70.0)
-            self.spin_rear.setValue(5.0)
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("恢复默认")
+        msg_box.setText("确定要恢复默认设置吗？")
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #2A2A2A;
+            }
+            QMessageBox QLabel {
+                color: #FFFFFF;
+            }
+        """)
+        yes_btn = msg_box.addButton("是", QMessageBox.YesRole)
+        no_btn = msg_box.addButton("否", QMessageBox.NoRole)
+        btn_style = """
+            QPushButton {
+                color: #000000;
+                background-color: #FFFFFF;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 6px 20px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #E0E0E0;
+            }
+            QPushButton:pressed {
+                background-color: #D0D0D0;
+            }
+        """
+        yes_btn.setStyleSheet(btn_style)
+        no_btn.setStyleSheet(btn_style)
+        msg_box.setDefaultButton(no_btn)
+        msg_box.exec_()
+
+        if msg_box.clickedButton() == yes_btn:
+            self.hr_max_value = 180
+            self.hr_min_value = 50
+            self.weight_value = 70.0
+            self.rear_value = 5.0
+            self.hr_max_label.setText(str(self.hr_max_value))
+            self.hr_min_label.setText(str(self.hr_min_value))
+            self.weight_label.setText(f"{self.weight_value:.1f}")
+            self.rear_label.setText(f"{self.rear_value:.1f}")
             self.chk_rear.setChecked(True)
             self.chk_hr.setChecked(True)
             self.chk_fatigue.setChecked(True)

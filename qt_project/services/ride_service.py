@@ -292,10 +292,13 @@ class RideService(QObject):
         # 移动时间：只要状态是 RIDING 就累加
         self.summary.moving_time += delta
 
-        # 骑行距离：当前速度 × 时间间隔（仅当位置发生变化时才累加）
-        if self._location_moved:
+        # 骑行距离：当前速度 × 时间间隔（有速度就累加距离）
+        # 速度单位 km/h，时间单位 秒，距离单位 km
+        if self._current_speed > 0:
             self.summary.total_distance += self._current_speed * delta / 3600.0
-            self._location_moved = False
+
+        # 重置位置变化标志
+        self._location_moved = False
 
         # 实时平均功率 / 心率
         if self._power_count > 0:
