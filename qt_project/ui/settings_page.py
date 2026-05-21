@@ -25,9 +25,10 @@ class SettingsPage(QWidget):
 
     config_saved = pyqtSignal()
 
-    def __init__(self, config: Optional[ConfigManager] = None, parent=None):
+    def __init__(self, config: Optional[ConfigManager] = None, comm_service=None, parent=None):
         super().__init__(parent)
         self.config = config or get_config()
+        self.comm_service = comm_service  # 通信服务引用，用于发送阈值
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -248,21 +249,25 @@ class SettingsPage(QWidget):
         self.chk_rear = QCheckBox("后方来车告警")
         self.chk_rear.setChecked(alerts.get("rear_vehicle", True))
         self.chk_rear.setStyleSheet(self._checkbox_style())
+        self.chk_rear.clicked.connect(lambda: self._send_alert_switch("rear_vehicle", self.chk_rear.isChecked()))
         checkbox_grid.addWidget(self.chk_rear, 0, 0)
 
         self.chk_hr = QCheckBox("心率异常告警")
         self.chk_hr.setChecked(alerts.get("heart_rate", True))
         self.chk_hr.setStyleSheet(self._checkbox_style())
+        self.chk_hr.clicked.connect(lambda: self._send_alert_switch("heart_rate", self.chk_hr.isChecked()))
         checkbox_grid.addWidget(self.chk_hr, 0, 1)
 
         self.chk_fatigue = QCheckBox("疲劳提醒")
         self.chk_fatigue.setChecked(alerts.get("fatigue", True))
         self.chk_fatigue.setStyleSheet(self._checkbox_style())
+        self.chk_fatigue.clicked.connect(lambda: self._send_alert_switch("fatigue", self.chk_fatigue.isChecked()))
         checkbox_grid.addWidget(self.chk_fatigue, 0, 2)
 
         self.chk_fall = QCheckBox("姿态异常/摔车检测")
         self.chk_fall.setChecked(alerts.get("fall", True))
         self.chk_fall.setStyleSheet(self._checkbox_style())
+        self.chk_fall.clicked.connect(lambda: self._send_alert_switch("fall", self.chk_fall.isChecked()))
         checkbox_grid.addWidget(self.chk_fall, 0, 3)
 
         checkbox_grid.setColumnStretch(4, 1)
@@ -296,6 +301,20 @@ class SettingsPage(QWidget):
 
         btn_layout.addStretch(1)
         layout.addLayout(btn_layout)
+
+        # 底部状态提示标签
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("""
+            QLabel {
+                color: #2ecc71;
+                background: transparent;
+                font-size: 13px;
+                padding: 4px;
+            }
+        """)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
+
         layout.addStretch(1)
 
         # 初始化值
@@ -461,36 +480,31 @@ class SettingsPage(QWidget):
 
         self.config_saved.emit()
 
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("保存成功")
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.setStyleSheet("""
-            QMessageBox {
-                background-color: #2A2A2A;
+        self.status_label.setText("✓ 设置已保存")
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(3000, lambda: self.status_label.setText(""))
+
+        # 发送阈值到 App 端
+        if self.comm_service:
+            self._send_threshold_to_app()
+
+    def _send_alert_switch(self, alert_name: str, enabled: bool):
+        """发送单个告警开关状态到 App 端"""
+        import time
+
+        payload = {
+            "type": "alert_switch",
+            "timestamp": time.strftime("%H:%M:%S"),
+            "data": {
+                "alert": alert_name,
+                "enabled": enabled
             }
-            QMessageBox QLabel {
-                color: #FFFFFF;
-            }
-        """)
-        ok_btn = msg_box.addButton(QMessageBox.Ok)
-        ok_btn.setStyleSheet("""
-            QPushButton {
-                color: #000000;
-                background-color: #FFFFFF;
-                border: 1px solid #CCCCCC;
-                border-radius: 4px;
-                padding: 6px 20px;
-                font-size: 13px;
-                min-width: 60px;
-            }
-            QPushButton:hover {
-                background-color: #E0E0E0;
-            }
-            QPushButton:pressed {
-                background-color: #D0D0D0;
-            }
-        """)
-        msg_box.exec_()
+        }
+        try:
+            self.comm_service._push_event("alert_switch", payload["data"])
+            print(f"[Settings] 已发送告警开关: {alert_name}={enabled}")
+        except Exception as e:
+            print(f"[Settings] 发送告警开关失败: {e}")
 
     def _reset_defaults(self):
         msg_box = QMessageBox(self)
@@ -543,6 +557,28 @@ class SettingsPage(QWidget):
             self.chk_fall.setChecked(True)
             self.slider_volume.setValue(85)
             self._save_settings()
+
+    def _send_threshold_to_app(self):
+        """发送阈值数据到 App 端（通过 BLE 和 MQTT 双通道）"""
+        import time
+
+        payload = {
+            "type": "threshold",
+            "timestamp": time.strftime("%H:%M:%S"),
+            "data": {
+                "heart_rate_max": int(self.hr_max_value),
+                "heart_rate_min": int(self.hr_min_value),
+                "rear_dist_alert": round(self.rear_value, 1),
+                "weight": round(self.weight_value, 1)
+            }
+        }
+
+        # 通过 comm_service 发送（会自动判断 BLE/MQTT 连接状态）
+        try:
+            self.comm_service._push_event("threshold", payload["data"])
+            print(f"[Settings] 已发送阈值到 App: {payload}")
+        except Exception as e:
+            print(f"[Settings] 发送阈值失败: {e}")
 
 
 if __name__ == "__main__":

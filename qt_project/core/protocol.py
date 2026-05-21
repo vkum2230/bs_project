@@ -199,10 +199,23 @@ class AppCommand:
     @classmethod
     def from_json(cls, text: str) -> "AppCommand":
         d = json.loads(text)
+        timestamp = d.get("timestamp", time.time())
+        # 如果 timestamp 是字符串（如 "14:30:52"），转换为时间戳
+        if isinstance(timestamp, str):
+            try:
+                # 尝试解析 "HH:MM:SS" 格式
+                parts = timestamp.split(":")
+                if len(parts) == 3:
+                    h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+                    now = time.time()
+                    struct = time.localtime(now)
+                    timestamp = now - (struct.tm_hour * 3600 + struct.tm_min * 60 + struct.tm_sec) + (h * 3600 + m * 60 + s)
+            except:
+                timestamp = time.time()
         return cls(
             cmd_type=AppCommandType(d.get("cmd", "ping")),
             payload=d.get("payload", {}),
-            timestamp=d.get("timestamp", time.time()),
+            timestamp=timestamp,
         )
 
 

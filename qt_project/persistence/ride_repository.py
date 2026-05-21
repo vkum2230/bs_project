@@ -205,6 +205,8 @@ class RideRepository:
             "calories": summary.calories,
             "gpx_path": gpx_path,
             "fit_path": fit_path,
+            "fitId": ride_id if fit_path else "",
+            "gpxId": ride_id if gpx_path else "",
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)

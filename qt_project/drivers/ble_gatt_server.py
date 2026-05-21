@@ -83,6 +83,8 @@ class NotifyCharacteristic(dbus.service.Object):
         self._on_subscribe = on_subscribe
         print(f"[BleGatt-DEBUG] NotifyChar 初始化: path={self.path}")
         dbus.service.Object.__init__(self, bus, self.path)
+        # 显式导出 GATT Characteristic 接口
+        self._gatt_iface = dbus.Interface(self, GATT_CHRC_IFACE)
         print(f"[BleGatt-DEBUG] NotifyChar dbus 注册完成: {self.path}")
 
     def get_properties(self):
@@ -191,12 +193,14 @@ class WriteCharacteristic(dbus.service.Object):
         self.bus = bus
         self.service = service
         self.on_command = on_command
-        self._buffer = b""
-        self._expected_total = 0
-        self._received_seqs = set()
+        # JSON 累积缓冲区
+        self._json_buffer = b""
         print(f"[BleGatt-DEBUG] WriteChar 初始化: path={self.path}")
         dbus.service.Object.__init__(self, bus, self.path)
-        print(f"[BleGatt-DEBUG] WriteChar dbus 注册完成: {self.path}")
+
+        # 显式导出 GATT Characteristic 接口
+        self._gatt_iface = dbus.Interface(self, GATT_CHRC_IFACE)
+        print(f"[BleGatt-DEBUG] WriteChar dbus 注册完成: {self.path}, gatt_iface={self._gatt_iface}")
 
     def get_properties(self):
         return dbus.Dictionary({
@@ -220,44 +224,71 @@ class WriteCharacteristic(dbus.service.Object):
             )
         return self.get_properties()[GATT_CHRC_IFACE]
 
-    @dbus.service.method(GATT_CHRC_IFACE, in_signature="aya{sv}")
+    @dbus.service.method(GATT_CHRC_IFACE, in_signature="aya{sv}", out_signature="")
     def WriteValue(self, value, options):
+        """处理 App 发来的写入请求（JSON 累积 + \n 分隔模式）"""
         data = bytes(value)
-        print(f"[BleGatt-DEBUG] WriteValue 被调用! path={self.path}, len={len(data)}")
-        if len(data) < 2:
-            print("[BleGatt-DEBUG] WriteValue: 数据太短，忽略")
+        print(f"[BleGatt-DEBUG] WriteValue 被调用! path={self.path}, len={len(data)}, hex={data.hex()[:40]}...")
+
+        # 如果数据以 '{' 开头，重置缓冲区（新消息开始）
+        if data and data[0] == 123:  # '{' ASCII
+            print(f"[BleGatt-DEBUG] 新消息开始，重置缓冲区")
+            self._json_buffer = b""
+
+        # 累积数据
+        self._json_buffer += data
+        text = self._json_buffer.decode("utf-8", errors="ignore")
+        print(f"[BleGatt-DEBUG] 累积后 buffer_len={len(self._json_buffer)}, text={text[:80]}")
+
+        # 检查是否有完整的消息（以 \n 结尾）
+        if "\n" in text:
+            lines = text.split("\n")
+            for i, line in enumerate(lines[:-1]):  # 处理所有完整行
+                if line.strip():
+                    print(f"[BleGatt-DEBUG] 完整消息: {line}")
+                    self._process_line(line.strip())
+            # 保留最后一行（可能不完整）
+            self._json_buffer = lines[-1].encode("utf-8")
+            print(f"[BleGatt-DEBUG] 保留不完整数据: {lines[-1][:50]}")
+
+    def _process_line(self, line: str):
+        """处理一行完整的 JSON 消息"""
+        if not line:
             return
 
-        seq = data[0]
-        total = data[1]
-        print(f"[BleGatt-DEBUG] WriteValue: seq={seq}, total={total}, payload_len={len(data)-2}")
+        try:
+            msg = json.loads(line)
+            print(f"[BleGatt-DEBUG] JSON 解析成功: {msg}")
 
-        if total == 1:
-            msg = data[2:].decode("utf-8", errors="ignore").strip()
-            print(f"[BleGatt-DEBUG] WriteValue: 单包消息: {msg[:100]}")
-            if msg:
+            # 检查是否是 App 的封包格式 {"deviceId":"...","chunkCount":N,"text":"..."}
+            chunk_count = msg.get("chunkCount")
+            text_content = msg.get("text", "")
+
+            if chunk_count is not None and text_content:
+                # 封包格式，text_content 才是真正的命令 JSON
+                print(f"[BleGatt-DEBUG] App 封包: chunkCount={chunk_count}, text={text_content[:100]}")
+                try:
+                    inner_cmd = json.loads(text_content.strip())
+                    print(f"[BleGatt-DEBUG] 内部命令: {inner_cmd}")
+                    if self.on_command:
+                        cmd_text = json.dumps(inner_cmd, ensure_ascii=False)
+                        print(f"[BleGatt-DEBUG] 发送命令: {cmd_text}")
+                        self.on_command(cmd_text)
+                except json.JSONDecodeError as e:
+                    print(f"[BleGatt-DEBUG] 封包内 JSON 解析失败: {e}")
+            else:
+                # 直接 JSON 命令
                 if self.on_command:
-                    self.on_command(msg)
-            return
+                    cmd_text = json.dumps(msg, ensure_ascii=False)
+                    print(f"[BleGatt-DEBUG] 发送命令: {cmd_text}")
+                    self.on_command(cmd_text)
 
-        if total != self._expected_total:
-            self._buffer = b""
-            self._received_seqs = set()
-            self._expected_total = total
-
-        self._buffer += data[2:]
-        self._received_seqs.add(seq)
-        print(f"[BleGatt-DEBUG] WriteValue: 收到包 {seq}/{total}, 已收 {len(self._received_seqs)}/{total}")
-
-        if len(self._received_seqs) == total:
-            msg = self._buffer.decode("utf-8", errors="ignore").strip()
-            self._buffer = b""
-            self._received_seqs = set()
-            self._expected_total = 0
-            print(f"[BleGatt-DEBUG] WriteValue: 分包组装完成: {msg[:100]}")
-            if msg:
-                if self.on_command:
-                    self.on_command(msg)
+        except json.JSONDecodeError as e:
+            print(f"[BleGatt-DEBUG] JSON 解析失败: {e}, 原文: {line[:100]}")
+        except Exception as e:
+            print(f"[BleGatt-DEBUG] 处理异常: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 # ==============================================================================
@@ -438,6 +469,8 @@ class BleGattServer(QThread):
         self._send_queue = queue.Queue()
         self._client_addr = None
         self._notify_subscribed = False
+        self._last_connected = None  # 重置连接状态检测
+        self._last_subscribed = False  # 重置订阅状态检测
         self._main_loop = None
         self._bus = None
         self._app = None
@@ -470,13 +503,20 @@ class BleGattServer(QThread):
 
     def has_connected_client(self) -> bool:
         with self._lock:
+            print(f"[BleGatt-DEBUG] has_connected_client 检查:")
+            print(f"  - _app exists: {self._app is not None}")
+            print(f"  - _app.service exists: {self._app.service if self._app else 'N/A'}")
+            if self._app and self._app.service:
+                print(f"  - notify_char exists: {self._app.service.notify_char is not None}")
+                print(f"  - notifying: {self._app.service.notify_char.notifying}")
+            print(f"  - _client_addr: {self._client_addr}")
             if not self._app or not self._app.service:
-                print(f"[BleGatt-DEBUG] has_connected_client=False: app={self._app}")
+                print(f"  - 返回 False: app 或 service 不存在")
                 return False
             notifying = self._app.service.notify_char.notifying
             has_addr = self._client_addr is not None
             result = notifying and has_addr
-            print(f"[BleGatt-DEBUG] has_connected_client={result}: notifying={notifying}, addr={self._client_addr}")
+            print(f"  - notifying={notifying}, has_addr={has_addr}, result={result}")
             return result
 
     def stop(self):
@@ -603,33 +643,24 @@ class BleGattServer(QThread):
 
     def _run_polling_loop(self):
         print("[BleGatt-DEBUG] 启动纯轮询模式")
-        last_connected = False
         last_subscribed = False
 
         while self._running:
-            connected, addr = self._check_connection()
             subscribed = self._app.service.notify_char.notifying if self._app else False
 
-            if connected and not last_connected:
-                self._client_addr = addr
-                print(f"[BleGatt] App 已连接: {addr}")
-                self.client_connected.emit(addr)
-            elif not connected and last_connected:
-                self._client_addr = None
-                self._notify_subscribed = False
-                print("[BleGatt] App 已断开")
-                self.client_disconnected.emit()
-
-            if subscribed and not last_subscribed and self._client_addr:
+            if subscribed and not last_subscribed:
+                # StartNotify 被调用说明 App 已连接
                 print("[BleGatt] App 已订阅 Notify，发送握手帧")
                 self._send_raw(b'{"isConnect":"OK"}\r\n')
             elif not subscribed and last_subscribed:
                 print("[BleGatt] App 取消订阅 Notify")
+                self._client_addr = None
+                self._notify_subscribed = False
+                self.client_disconnected.emit()
 
-            last_connected = connected
             last_subscribed = subscribed
 
-            if connected and subscribed and self._app:
+            if subscribed and self._app:
                 self._drain_send_queue()
 
             time.sleep(0.05)
@@ -645,26 +676,25 @@ class BleGattServer(QThread):
         if not self._running:
             return False
 
-        connected, addr = self._check_connection()
-        subscribed = self._app.service.notify_char.notifying if self._app else False
+        try:
+            # 直接使用 notifying 状态作为连接依据
+            # StartNotify 被调用 → notifying=True → 连接建立
+            # StopNotify 被调用 → notifying=False → 连接断开
+            subscribed = self._app.service.notify_char.notifying if self._app else False
 
-        if connected and not getattr(self, '_last_connected', False):
-            self._client_addr = addr
-            print(f"[BleGatt] App 已连接: {addr}")
-            self.client_connected.emit(addr)
+            # 只在状态变化时打印日志
+            last_subs = getattr(self, '_last_subscribed', None)
+            if subscribed != last_subs:
+                print(f"[BleGatt-DEBUG] 订阅状态变化: subscribed={subscribed}")
 
-        if not connected and getattr(self, '_last_connected', False):
-            self._client_addr = None
-            self._notify_subscribed = False
-            print("[BleGatt] App 已断开")
-            self.client_disconnected.emit()
+            # 订阅时（从False变为True），发送握手帧
+            if subscribed and last_subs is not True and self._client_addr:
+                print("[BleGatt] App 已订阅 Notify，发送握手帧")
+                self._send_raw(b'{"isConnect":"OK"}\r\n')
 
-        if subscribed and not getattr(self, '_last_subscribed', False) and self._client_addr:
-            print("[BleGatt] App 已订阅 Notify，发送握手帧")
-            self._send_raw(b'{"isConnect":"OK"}\r\n')
-
-        self._last_connected = connected
-        self._last_subscribed = subscribed
+            self._last_subscribed = subscribed
+        except Exception as e:
+            print(f"[BleGatt-DEBUG] _glib_check_connection 异常: {e}")
         return True
 
     def _drain_send_queue(self):
@@ -687,6 +717,12 @@ class BleGattServer(QThread):
             print(f"[BleGatt-DEBUG] _drain_send_queue: 发送了 {sent_count} 条消息")
 
     def _check_connection(self) -> tuple:
+        """
+        检查是否连接到我们的 GATT 服务器
+
+        BlueZ 中，设备连接时会出现在 managed_objects 中
+        我们需要检查是否有设备连接到我们的 GATT 服务
+        """
         try:
             if not self._app:
                 return False, ""
@@ -696,23 +732,81 @@ class BleGattServer(QThread):
                 DBUS_OM_IFACE,
             )
             objects = om.GetManagedObjects()
+
+            print(f"[BleGatt-DEBUG] _check_connection: 检查 {len(objects)} 个对象")
+
             for path, interfaces in objects.items():
-                if DEVICE_IFACE in interfaces:
-                    props = interfaces[DEVICE_IFACE]
-                    if props.get("Connected", False):
-                        addr = str(props.get("Address", ""))
-                        return True, addr
+                if DEVICE_IFACE not in interfaces:
+                    continue
+
+                props = interfaces[DEVICE_IFACE]
+                connected = props.get("Connected", False)
+
+                if not connected:
+                    continue
+
+                addr = str(props.get("Address", ""))
+
+                # 方法1：检查设备的 Services 属性（BlueZ 5.60+）
+                services = props.get("Services", [])
+                if services:
+                    print(f"[BleGatt-DEBUG] _check_connection: 设备 {addr} 的 Services: {services}")
+
+                # 方法2：检查设备的 UUIDs 属性
+                uuids = props.get("UUIDs", [])
+                if isinstance(uuids, dbus.Array):
+                    uuids = [str(u) for u in uuids]
+                print(f"[BleGatt-DEBUG] _check_connection: 设备 {addr} 已连接, UUIDs: {uuids[:5] if uuids else 'None'}")
+
+                # 检查是否连接到我们的 GATT 服务
+                our_service = SERVICE_UUID.upper()
+                our_service_short = our_service.replace("-", "")[:8].upper()
+
+                # 检查 UUIDs
+                is_our_device = False
+                for uuid in uuids:
+                    uuid_upper = uuid.upper()
+                    if our_service in uuid_upper or our_service_short in uuid_upper.replace("-", ""):
+                        is_our_device = True
+                        break
+
+                # 检查 Services (BlueZ 5.60+)
+                if not is_our_device and services:
+                    for svc in services:
+                        svc_str = str(svc).upper()
+                        if our_service in svc_str or our_service_short in svc_str.replace("-", ""):
+                            is_our_device = True
+                            break
+
+                if is_our_device:
+                    print(f"[BleGatt-DEBUG] _check_connection: 找到连接到我们 GATT 服务的设备: {addr}")
+                    return True, addr
+                else:
+                    print(f"[BleGatt-DEBUG] _check_connection: 发现其他已连接设备: {addr}")
+
             return False, ""
-        except Exception:
+        except Exception as e:
+            print(f"[BleGatt-DEBUG] _check_connection 异常: {e}")
+            import traceback
+            traceback.print_exc()
             return False, ""
 
     def _on_notify_subscribe(self, subscribed: bool):
         if subscribed:
-            print("[BleGatt] Notify 订阅状态: 已订阅")
+            print("[BleGatt] Notify 订阅状态: 已订阅，触发 client_connected 信号")
+            # StartNotify 被调用说明 App 已连接，直接通过此回调触发连接信号
+            # 不再依赖 _check_connection() 的 UUID 检测（BlueZ 不暴露 FF00 服务 UUID）
+            if self._client_addr is None:
+                self._client_addr = "app-device"
+            # 立即发送握手帧，不经过 notify() 队列（确保时序正确）
+            print(f"[BleGatt] 立即发送握手帧...")
+            self._send_raw(b'{"deviceId":"1"}\r\n')
+            self.client_connected.emit(self._client_addr)
         else:
             print("[BleGatt] Notify 订阅状态: 已取消")
             if self._client_addr:
                 self._client_addr = None
+                self._notify_subscribed = False
                 self.client_disconnected.emit()
 
     def _on_command(self, text: str):

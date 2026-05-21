@@ -3189,7 +3189,7 @@ class MapWidget(QWidget):
         
         // 将GPS位置投影到路线上（路径匹配）
         // 导航状态变量
-        
+
         function updatePosition(lng, lat, province) {{
             var newPos = [lng, lat];
             currentPos = newPos;
@@ -3268,12 +3268,12 @@ class MapWidget(QWidget):
                 // 检查是否需要播报下一条指令
                 checkNavStep();
             }}
-            
+
             // 通知 Python 端位置更新
             if (typeof navHandler !== 'undefined' && navHandler) {{
                 navHandler.on_position_updated(lat, lng);
             }}
-            
+
             // 非导航模式下更新当前位置标记
             if (!isNavigating) {{
                 if (currentMarker) {{
@@ -3290,13 +3290,17 @@ class MapWidget(QWidget):
                 if (yawMarker) {{
                     yawMarker.setPosition(currentPos);
                 }}
-                map.setCenter(currentPos);
-                map.setZoom(16);
-                
+                // 只在第一次设置中心点和缩放级别，之后只更新标记和轨迹
+                if (!window.locationInitialized) {{
+                    map.setCenter(currentPos);
+                    map.setZoom(16);
+                    window.locationInitialized = true;
+                    console.log('[Map] 首次位置初始化完成，中心点已设置');
+                }}
                 // 绘制轨迹
                 trackPoints.push(currentPos);
                 if (trackPoints.length > 400) trackPoints.shift();
-                
+
                 if (trackPoints.length > 1) {{
                     if (trackLine) map.remove(trackLine);
                     trackLine = new AMap.Polyline({{
@@ -3308,7 +3312,7 @@ class MapWidget(QWidget):
                     }});
                 }}
             }}
-            
+
         }}
         
         window.updatePosition = updatePosition;
@@ -3862,8 +3866,12 @@ class MapWidget(QWidget):
             console.log('更新位置:', lon, lat, province);
             currentPos = [lat, lon];
 
-            // 移动地图中心
-            map.panTo([lat, lon]);
+            // 只在第一次收到位置时移动地图中心并设置缩放级别
+            if (!window.locationInitialized) {{
+                map.setView([lat, lon], 16);
+                window.locationInitialized = true;
+                console.log('[Map] 首次位置初始化完成，中心点已设置');
+            }}
 
             // 添加/更新定位标记
             var arrowHtml = '<div id="yaw-arrow" style="width:48px;height:48px;transform-origin:center center;">' +

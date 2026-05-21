@@ -762,7 +762,7 @@ class BikeComputerPro(QWidget):
         self.page_history.ride_selected.connect(self._on_history_ride_selected)
 
         # --- 设置页面（用 QScrollArea 包装，避免内容过多撑大整体布局） ---
-        self.page_settings = SettingsPage(config=self.config, parent=self)
+        self.page_settings = SettingsPage(config=self.config, comm_service=self.comm_service, parent=self)
         self.page_settings.config_saved.connect(self._on_config_saved)
 
         scroll_settings = QScrollArea()
@@ -1211,6 +1211,15 @@ class BikeComputerPro(QWidget):
     def _on_config_saved(self):
         print("[Main] 配置已更新并保存")
         self.add_voice_message("设置已保存", icon="⚙️")
+        # 发送阈值变化通知给 App
+        try:
+            hr_max = self.config.get("heart_rate_max", 180)
+            hr_min = self.config.get("heart_rate_min", 60)
+            rear_dist_threshold = self.config.get("rear_dist_alert_m", 10.0)
+            if hasattr(self, 'comm_service') and self.comm_service:
+                self.comm_service.send_threshold(hr_max, hr_min, rear_dist_threshold)
+        except Exception as e:
+            print(f"[Main] 发送阈值通知失败: {e}")
 
     # --------------------------------------------------------------------------
     # App 连接状态管理（xinjia.txt 协议）
@@ -1269,8 +1278,8 @@ class BikeComputerPro(QWidget):
         if self.connect != 0:
             print("[Main] 长按断开 App 连接")
             # 消息由 _on_app_disconnected 统一显示，避免重复
+            # 注意：self.connect = 0 会在 _on_app_disconnected 中根据 channel 匹配后设置
             self.comm_service.disconnect_app()
-            self.connect = 0
             self._update_connect_indicator()
         else:
             print("[Main] 当前未连接，长按无效")
@@ -1298,6 +1307,7 @@ class BikeComputerPro(QWidget):
 
     def _on_app_connected(self, channel: str):
         """App 已通过任一通道连接"""
+        print(f"[Main] _on_app_connected 被调用: channel={channel}, 当前页面={self.stacked_widget.currentIndex()}")
         # 先确保欢迎消息出现在消息框最上方（同步写入，避免语音异步导致顺序错乱）
         if not self._welcome_played:
             self._welcome_played = True
@@ -1328,11 +1338,12 @@ class BikeComputerPro(QWidget):
 
     def _on_app_disconnected(self, channel: str):
         """App 断开连接"""
-        print(f"[Main] App 已通过 [{channel}] 断开")
+        print(f"[Main] _on_app_disconnected 被调用: channel={channel}, self.connect={self.connect}")
         # 只有当当前通道与连接通道匹配时才置为 0
         if (channel == "mqtt" and self.connect == 1) or (channel == "ble" and self.connect == 2):
             self.connect = 0
             self._update_connect_indicator()
+            print(f"[Main] _on_app_disconnected: 准备显示断开消息")
             self.add_voice_message("与手机的连接已断开", icon="📱")
             if self.voice_player:
                 try:
@@ -1341,7 +1352,10 @@ class BikeComputerPro(QWidget):
                     print(f"[Main] 断开语音播报异常: {e}")
             # BLE 断开时恢复连接页面状态
             if channel == "ble":
+                print(f"[Main] _on_app_disconnected: 准备调用 on_ble_disconnected")
                 self.page_connect.on_ble_disconnected()
+        else:
+            print(f"[Main] _on_app_disconnected: 通道不匹配，跳过消息显示 (mqtt需要connect==1, ble需要connect==2)")
 
     # --------------------------------------------------------------------------
 
@@ -1797,6 +1811,7 @@ class BikeComputerPro(QWidget):
             state_map = {1: "riding", 2: "paused", 3: "riding", 4: "finished"}
             state_val = cmd.payload.get("ride_state", 1)
             state_str = state_map.get(state_val, "riding")
+            print(f"[Main] SET_RIDE_STATE: ride_state={state_val}, mapped={state_str}, current={self.ride_service.state.value}")
             if state_str == "riding" and self.ride_service.state.value == "idle":
                 self.ride_service.start_ride()
             elif state_str == "paused":
@@ -1805,6 +1820,7 @@ class BikeComputerPro(QWidget):
                 self.ride_service.stop_ride()
             elif state_str == "riding" and self.ride_service.state.value == "paused":
                 self.ride_service.resume_ride()
+            print(f"[Main] SET_RIDE_STATE 完成: new_state={self.ride_service.state.value}")
 
         elif cmd.cmd_type == AppCommandType.SET_NAV_DESTINATION:
             gps = cmd.payload.get("gps", {})
@@ -1873,15 +1889,20 @@ class BikeComputerPro(QWidget):
 
     def _on_alert_triggered(self, alert_type: str, message: str, level: str):
         """处理 AlertService 触发的告警"""
+        print(f"[Main] _on_alert_triggered: alert_type={alert_type}, message={message}, level={level}")
         # UI 消息（只写一次，语音播放器内部不再重复添加）
         self.add_voice_message(message, icon="⚠️")
 
         # 语音播报（show_in_ui=False 避免消息框重复输出）
         if self.voice_player:
+            print(f"[Main] _on_alert_triggered: 调用语音播报")
             self.voice_player.speak(message, show_in_ui=False)
+        else:
+            print(f"[Main] _on_alert_triggered: voice_player 为 None，跳过语音播报")
 
         # LED 闪灯：critical 红灯闪烁，warning 黄灯闪烁，其他蓝灯闪烁
         if self.led_controller:
+            print(f"[Main] _on_alert_triggered: 控制 LED 闪灯, level={level}")
             if level == "critical":
                 self.led_controller.start_pattern("blink", LEDController.COLOR_RED)
             elif level == "warning":
@@ -1895,6 +1916,8 @@ class BikeComputerPro(QWidget):
                 self.led_controller.stop_pattern(),
                 self.led_controller.set_all(LEDController.COLOR_GREEN)
             ))
+        else:
+            print(f"[Main] _on_alert_triggered: led_controller 为 None，跳过 LED 控制")
 
     # --------------------------------------------------------------------------
     # 骑行服务回调
@@ -1993,6 +2016,8 @@ class BikeComputerPro(QWidget):
                 return f"{h:02d}:{m:02d}:{s:02d}"
             self.comm_service._push_event("history", {
                 "id": summary.id,
+                "fitId": summary.id,
+                "gpxId": "ride_20260520_181234",
                 "start_time": time.strftime("%H:%M:%S", time.localtime(summary.start_time)) if summary.start_time else "--",
                 "total_distance": round(summary.total_distance, 2),
                 "total_time": _fmt_sec(summary.total_time),

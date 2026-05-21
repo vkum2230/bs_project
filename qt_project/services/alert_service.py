@@ -50,7 +50,9 @@ class AlertService(QObject):
         self._check_fall(sensor, now)
 
         # 只有骑行中才检查其他告警
+        print(f"[AlertService] on_sensor_data: ride_state={ride_state}, expected={RideSessionState.RIDING}")
         if ride_state != RideSessionState.RIDING:
+            print(f"[AlertService] on_sensor_data: 骑行状态不是 RIDING，跳过后方来车检查")
             return
 
         self._check_rear_vehicle(sensor, now)
@@ -65,16 +67,23 @@ class AlertService(QObject):
 
     def _check_rear_vehicle(self, sensor: SensorData, now: float):
         """后方来车告警"""
+        print(f"[AlertService] _check_rear_vehicle: rear_dist={sensor.rear_dist}, speed={sensor.speed}")
+
         if sensor.rear_dist <= 0 or sensor.speed <= 0:
+            print(f"[AlertService] _check_rear_vehicle: 跳过 - rear_dist={sensor.rear_dist} <= 0 或 speed={sensor.speed} <= 0")
             return
 
         threshold = self.config.get("rear_dist_alert_m", 5.0)
+        print(f"[AlertService] _check_rear_vehicle: threshold={threshold}")
+
         if sensor.rear_dist >= threshold:
+            print(f"[AlertService] _check_rear_vehicle: rear_dist({sensor.rear_dist}) >= threshold({threshold}), 不触发告警")
             return
 
         level = "critical" if sensor.rear_dist < 3.0 else "warning"
         cooldown = 5.0 if sensor.rear_dist < 3.0 else 10.0
         msg = f"注意后方来车，距离 {sensor.rear_dist:.1f} 米"
+        print(f"[AlertService] _check_rear_vehicle: 准备触发告警 - {msg}")
         self._trigger(AlertType.REAR_VEHICLE, msg, level, cooldown, now)
 
     def _check_heart_rate(self, sensor: SensorData, now: float):
@@ -116,6 +125,7 @@ class AlertService(QObject):
 
     def _trigger(self, alert_type: AlertType, message: str, level: str, cooldown_sec: float, now: float):
         type_key = alert_type.value
+        print(f"[AlertService] _trigger: type={type_key}, message={message}, level={level}")
 
         # 检查全局开关（映射 AlertType -> config 中的开关名）
         alert_name_map = {
@@ -127,12 +137,16 @@ class AlertService(QObject):
             "off_route": "off_route",
         }
         alert_name = alert_name_map.get(type_key, type_key)
+        print(f"[AlertService] _trigger: alert_name={alert_name}, get_alert={self.config.get_alert(alert_name)}")
         if not self.config.get_alert(alert_name):
+            print(f"[AlertService] _trigger: 告警开关关闭，跳过")
             return
 
         # 检查冷却
         next_allowed = self._cooldowns.get(type_key, 0)
+        print(f"[AlertService] _trigger: next_allowed={next_allowed}, now={now}, cooldown={cooldown_sec}")
         if now < next_allowed:
+            print(f"[AlertService] _trigger: 冷却中，跳过")
             return
 
         self._cooldowns[type_key] = now + cooldown_sec
